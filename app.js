@@ -26,7 +26,7 @@ const S = {
   rep: { from: null, to: null, user: '', project: '', client: '', tag: '', desc: '', g1: 'project', g2: 'description', tab: 'summary', open: new Set() },
   team: { status: 'active', role: '', q: '' },
   proj: { search: '', status: 'active', client: '' },
-  trk: { weeks: 2, open: new Set() },
+  trk: { limit: 50, open: new Set() },
   dash: { from: null, to: null, group: 'project', who: 'me' },
   imp: null
 };
@@ -860,10 +860,12 @@ function parseDur(v) {
 }
 
 async function renderTracker(page) {
-  const today = startOfDay(new Date()), wk0 = startOfWeek(today);
-  const weeks = S.trk.weeks, from = addDays(wk0, -7 * (weeks - 1));
-  const entries = await fetchEntries({ from, to: addDays(today, 1), userId: S.me.id });
+  const wk0 = startOfWeek(new Date());
+  // Zoals Clockify: altijd de meest recente registraties (hoe oud ook), per 50 bijladen
+  const { data, error } = await sb.from('time_entries').select('*').eq('user_id', S.me.id).order('start_at', { ascending: false }).limit(S.trk.limit + 1);
+  if (error) throw error;
   if (S.view !== 'tracker') return;
+  const more = data.length > S.trk.limit, entries = data.slice(0, S.trk.limit);
   // Gelijke registraties op dezelfde dag worden gegroepeerd (zoals Clockify)
   const gkey = e => [ymd(entryStart(e)), e.description.trim().toLowerCase(), e.project_id || '', [...(e.tag_ids || [])].sort().join(','), e.billable].join('|');
   const groups = new Map();
@@ -871,10 +873,10 @@ async function renderTracker(page) {
     const k = gkey(e); if (!groups.has(k)) groups.set(k, { key: k, items: [] }); groups.get(k).items.push(e);
   }
   const blocks = [];
-  for (let i = 0; i < weeks; i++) {
-    const a = addDays(wk0, -7 * i), b = addDays(a, 7);
+  const weekStarts = [...new Set(entries.map(e => +startOfWeek(entryStart(e))))].sort((x, y) => y - x).map(t => new Date(t));
+  for (const a of weekStarts) {
+    const b = addDays(a, 7), i = Math.round((wk0 - a) / (7 * DAY_MS));
     const wkEntries = entries.filter(e => entryStart(e) >= a && entryStart(e) < b);
-    if (!wkEntries.length) continue;
     const label = i === 0 ? 'This week' : i === 1 ? 'Last week' : `${fmtDate(a, { month: 'short', day: 'numeric' })} - ${fmtDate(addDays(a, 6), { month: 'short', day: 'numeric' })}`;
     let html = `<div class="wk-head"><span>${esc(label)}</span><span class="muted small">Week total: <b class="wk-tot num">${fmtHMS(wkEntries.reduce((t, e) => t + entrySec(e), 0))}</b></span></div>`;
     for (let d = 6; d >= 0; d--) {
@@ -889,10 +891,10 @@ async function renderTracker(page) {
   page.innerHTML = `
     <div class="timerbar card" id="timerbar"></div>
     ${blocks.join('') || '<div class="card empty">No time entries yet. Start the timer or add time manually.</div>'}
-    <div class="row" style="justify-content:center"><button class="btn" id="trk-more">Load more</button></div>`;
+    ${more ? '<div class="row" style="justify-content:center"><button class="btn" id="trk-more">Load more</button></div>' : ''}`;
   renderTimer();
   bindTrackRows(page, groups, entries);
-  $('#trk-more').onclick = () => { S.trk.weeks += 4; refreshPage(); };
+  if ($('#trk-more')) $('#trk-more').onclick = () => { S.trk.limit += 50; refreshPage(); };
 }
 
 function trackRow(g, child = false) {
