@@ -3,11 +3,12 @@
 Interne urenregistratie (alternatief voor Clockify) — statische website + Supabase.
 
 **Functies**
-- **Timer** bovenaan elke pagina: omschrijving, project, factureerbaar (€), start/stop. Of registreer manueel.
+- **Timer** bovenaan elke pagina: omschrijving, project, tags, factureerbaar (€), start/stop. Of registreer manueel.
 - **Dashboard**: uren vandaag / deze week (t.o.v. weekdoel) / deze maand, % factureerbaar, grafiek per dag, verdeling per project, recente registraties (opnieuw starten, bewerken, verwijderen). Beheerders zien wie er nu aan het werk is.
 - **Kalender**: weekweergave; klik op een leeg vak om uren toe te voegen, klik op een blok om te bewerken. Beheerders kunnen de kalender van elke collega bekijken.
-- **Rapporten**: periode (deze week, vorige maand, aangepast…), filters op medewerker, klant, project en factureerbaar. Samenvatting gegroepeerd op project / medewerker / klant / dag / omschrijving, gedetailleerde lijst, bedragen, en **CSV-export** (opent in Excel).
-- **Projecten**: klanten, kleur, uurtarief, budget in uren met voortgangsbalk, archiveren.
+- **Rapporten**: periode (deze week, vorige maand, aangepast…), filters op medewerker, klant, project, tag en factureerbaar. Samenvatting gegroepeerd op project / medewerker / klant / tag / dag / omschrijving, gedetailleerde lijst, bedragen, en **CSV-export** (opent in Excel).
+- **Projecten**: klanten, kleur, uurtarief, budget in uren met voortgangsbalk, archiveren. Tags beheren.
+- **Importeren** (beheerders): registraties, projecten, klanten en tags overzetten uit een Clockify-export (CSV).
 - **Team**: uren deze week t.o.v. weekdoel, wie nu werkt, rollen, uurtarieven, accounts deactiveren, uitnodigingslink.
 
 **Rechten**
@@ -34,6 +35,26 @@ Interne urenregistratie (alternatief voor Clockify) — statische website + Supa
 > *Authentication → Providers → Email → Allow new users to sign up* uit en nodig collega's uit
 > via *Authentication → Users → Invite user*.
 
+## Updates van de database
+
+Nieuwe functies die de database wijzigen komen als apart script in `supabase/`. Voer ze **één keer** uit in de SQL Editor, na `schema.sql` (opnieuw uitvoeren mag):
+
+| Script | Voor |
+|---|---|
+| [`supabase/schema-v2-tags-import.sql`](supabase/schema-v2-tags-import.sql) | tags en importeren uit Clockify |
+
+## Overzetten vanuit Clockify
+
+1. Voer `schema-v2-tags-import.sql` uit (zie hierboven).
+2. Laat alle collega's eerst een account maken: registraties worden via het **e-mailadres** aan hun account gekoppeld.
+3. In Clockify: *Reports → Detailed*, kies de volledige periode, *Export → Save as CSV*. Optioneel ook de projectlijst
+   (*Projects*, actief én gearchiveerd) als CSV, zodat ook oude projecten zonder uren in de export meekomen.
+4. In Polyfy (als beheerder): *Importeren*, kies de bestanden, controleer de koppeling van medewerkers en klik *Importeren*.
+   Klanten, projecten en tags die nog niet bestaan worden aangemaakt; alle projecten komen als *actief* binnen.
+5. Opnieuw importeren is veilig: registraties die al geïmporteerd zijn worden overgeslagen. Handig als een collega later pas een account maakt.
+
+Niet in de export, dus achteraf zelf instellen: uurtarieven, budgetten en weekdoelen.
+
 ## Lokaal testen
 
 Het is pure HTML/JS zonder build-stap:
@@ -48,6 +69,7 @@ python3 -m http.server 8000
 | Bestand | Inhoud |
 |---|---|
 | `index.html` | opmaak (licht/donker thema, mobielvriendelijk) |
-| `app.js` | alle logica: login, timer, dashboard, kalender, rapporten, projecten, team |
+| `app.js` | alle logica: login, timer, dashboard, kalender, rapporten, projecten, team, import |
 | `config.js` | Supabase-URL en anon key |
 | `supabase/schema.sql` | tabellen, beveiliging (RLS) en functies |
+| `supabase/schema-v2-tags-import.sql` | update: tags en import |

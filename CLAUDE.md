@@ -10,15 +10,17 @@ Taal van de UI, commits en communicatie: **Nederlands (Vlaams)**.
 - Hosting: GitHub Pages vanaf de root van `main` → `https://polygon-tools.github.io/Polyfy/`.
 
 ## Functies (allemaal aanwezig)
-- Timerbalk bovenaan elke pagina (omschrijving, project, factureerbaar €, start/stop) + manuele registratie.
+- Timerbalk bovenaan elke pagina (omschrijving, project, tags, factureerbaar €, start/stop) + manuele registratie.
 - Dashboard: KPI's vandaag/week (vs weekdoel)/maand/% factureerbaar, staafgrafiek per dag, verdeling per project, recente registraties; admins zien "nu aan het werk".
 - Kalender: weekweergave, klik leeg vak = toevoegen, klik blok = bewerken; admin kan collega kiezen.
-- Rapporten: periodes + filters (medewerker, klant, project, factureerbaar), samenvatting per project/medewerker/klant/dag/omschrijving, gedetailleerde lijst, bedragen, CSV-export (`;`-gescheiden, BOM, voor Excel).
-- Projecten & klanten: kleur, uurtarief, budget-uren met voortgang, archiveren.
+- Rapporten: periodes + filters (medewerker, klant, project, tag, factureerbaar), samenvatting per project/medewerker/klant/tag/dag/omschrijving, gedetailleerde lijst, bedragen, CSV-export (`;`-gescheiden, BOM, voor Excel).
+- Projecten & klanten: kleur, uurtarief, budget-uren met voortgang, archiveren. Tags beheren (iedereen mag tags maken, admins wijzigen/verwijderen).
+- Importeren (admin): Clockify-CSV (gedetailleerd rapport en/of projectlijst) → klanten, projecten, tags, registraties. Medewerkers koppelen op e-mail/naam; dubbels vermeden via `time_entries.source_ref` (unieke index, upsert met ignoreDuplicates).
 - Team: weekuren vs doel, live status, rollen, tarieven, deactiveren, uitnodigingslink.
 
 ## Datamodel & rechten
-- Tabellen: `profiles` (role admin|member, hourly_rate, weekly_target, active), `clients`, `projects`, `time_entries` (end_at null = lopende timer; max 1 per gebruiker).
+- Tabellen: `profiles` (role admin|member, hourly_rate, weekly_target, active), `clients`, `projects`, `time_entries` (end_at null = lopende timer; max 1 per gebruiker; `tag_ids uuid[]`, `source_ref`), `tags` (v2).
+- `schema-v2-tags-import.sql`: tags + import. De app werkt ook zonder (`S.tagsReady` = false → geen tags/import, `tagField()` laat `tag_ids` weg).
 - Eerste geregistreerde gebruiker wordt automatisch admin (trigger `handle_new_user`).
 - RLS: leden zien/beheren enkel eigen uren; admins alles. Projecten/klanten: iedereen leest, admins schrijven.
 - RPC's (security definer): `team_summary(week_start)` en `project_totals()`.
@@ -36,4 +38,5 @@ Taal van de UI, commits en communicatie: **Nederlands (Vlaams)**.
 - `config.js` is ingevuld (project-URL + anon key van het echte Supabase-project).
 - GitHub Pages staat aan (branch `main`, map `/ (root)`) → `https://polygon-tools.github.io/Polyfy/`.
 - Code is getest met een nep-Supabase in een headless browser; eerste test tegen het echte project (account aanmaken → admin) moet nog gebeuren.
-- Mogelijke uitbreidingen die ooit gevraagd kunnen worden: tags, taken binnen projecten, goedkeuren van timesheets, PDF-export, verlof/afwezigheden.
+- Tags en Clockify-import gebouwd en getest met een nep-Supabase en een echte Clockify-export (938 registraties). `schema-v2-tags-import.sql` moet nog uitgevoerd worden in Supabase, daarna importeren.
+- Mogelijke uitbreidingen die ooit gevraagd kunnen worden: taken binnen projecten, goedkeuren van timesheets, PDF-export, verlof/afwezigheden.

@@ -96,7 +96,7 @@ h3{font-size:14px;font-weight:600}
 input,select,textarea{font:inherit;color:var(--text);background:var(--surface);border:1px solid var(--line-strong);border-radius:var(--r-sm);padding:7px 10px;min-width:0}
 input:focus,select:focus,textarea:focus{outline:2px solid var(--accent-soft);border-color:var(--accent)}
 input[type=checkbox]{width:16px;height:16px;accent-color:var(--accent)}
-label.field{display:flex;flex-direction:column;gap:4px;font-size:12px;font-weight:500;color:var(--text-2)}
+label.field,div.field{display:flex;flex-direction:column;gap:4px;font-size:12px;font-weight:500;color:var(--text-2)}
 label.check{display:inline-flex;align-items:center;gap:8px;cursor:pointer}
 .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
@@ -106,6 +106,19 @@ label.check{display:inline-flex;align-items:center;gap:8px;cursor:pointer}
 .seg button.on{background:var(--accent-soft);color:var(--accent)}
 .billable-toggle{border:1px solid var(--line-strong);background:var(--surface);color:var(--muted);border-radius:var(--r-sm);width:34px;height:34px;font-weight:700;cursor:pointer}
 .billable-toggle.on{color:var(--accent);border-color:var(--accent);background:var(--accent-soft)}
+.tagbtn{max-width:220px;color:var(--muted)}
+.tagbtn span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tagbtn.on{color:var(--accent)}
+.tagpop{position:fixed;z-index:70;width:260px;background:var(--surface);border:1px solid var(--line-strong);border-radius:var(--r-sm);box-shadow:var(--shadow-lg);padding:8px;display:flex;flex-direction:column;gap:6px}
+.tagpop .list{max-height:240px;overflow-y:auto;display:flex;flex-direction:column;gap:2px}
+.tagpop .list label.check{padding:5px 6px;border-radius:4px}
+.tagpop .list label.check:hover{background:var(--surface-2)}
+.tagpop .list .btn{justify-content:flex-start}
+button.tag.tagedit{cursor:pointer;font-family:inherit}
+button.tag.tagedit:hover{border-color:var(--accent);color:var(--accent)}
+.notice{background:var(--warn-soft);color:var(--warn);border-color:transparent}
+.notice code{background:var(--surface);padding:1px 5px;border-radius:4px}
+details summary{cursor:pointer}
 
 /* ---------- Cards ---------- */
 .card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow)}
