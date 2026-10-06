@@ -39,5 +39,7 @@ Taal van de UI, commits en communicatie: **Nederlands (Vlaams)**.
 - `config.js` is ingevuld (project-URL + anon key van het echte Supabase-project).
 - GitHub Pages staat aan (branch `main`, map `/ (root)`) → `https://polygon-tools.github.io/Polyfy/`.
 - Code is getest met een nep-Supabase in een headless browser; eerste test tegen het echte project (account aanmaken → admin) moet nog gebeuren.
+- `config.js`: `ALLOWED_EMAIL_DOMAIN = 'polygon3d.be'`.
+- `tools/clockify_naar_sql.py`: zet Clockify-CSV's om naar één SQL-bestand (v2 + v3 + data, idempotent) dat Seppe in de SQL Editor plakt, zodat hij niet zelf via de site moet importeren. Uitvoer bevat persoonsgegevens → nooit committen. Eerste bestand (jul–okt 2026 + 744 projecten) aan Seppe bezorgd; de volledige historiek (Clockify-totaal 58.425 u) moet hij nog exporteren (Reports → Detailed, eventueel per jaar).
 - Tags en Clockify-import gebouwd en getest met een nep-Supabase en een echte Clockify-export (938 registraties). `schema-v2` en `schema-v3` moeten nog uitgevoerd worden in Supabase, daarna importeren (kan vóór collega's een account hebben). Alle SQL-scripts getest op lokale Postgres 16 met nagebootste auth.
 - Mogelijke uitbreidingen die ooit gevraagd kunnen worden: taken binnen projecten, goedkeuren van timesheets, PDF-export, verlof/afwezigheden.
