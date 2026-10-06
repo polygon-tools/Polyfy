@@ -69,13 +69,14 @@ function parseHM(v) {
 const parseYmd = s => { const [y, m, d] = s.split('-').map(Number); return new Date(y, m - 1, d); };
 const hm = d => `${pad(d.getHours())}:${pad(d.getMinutes())}`;
 const sameDay = (a, b) => ymd(a) === ymd(b);
-const DAYS_SHORT = ['ma', 'di', 'wo', 'do', 'vr', 'za', 'zo'];
-const fmtDate = (d, opts) => d.toLocaleDateString('nl-BE', opts);
+const DAYS_SHORT = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+// Engels zoals Clockify ("Tue, Sep 29"); numerieke datums als dd/mm/jjjj
+const fmtDate = (d, opts) => d.toLocaleDateString(opts?.month === '2-digit' ? 'en-GB' : 'en-US', opts);
 const fmtDayLong = d => {
   const today = startOfDay(new Date());
-  if (sameDay(d, today)) return 'Vandaag';
-  if (sameDay(d, addDays(today, -1))) return 'Gisteren';
-  return fmtDate(d, { weekday: 'long', day: 'numeric', month: 'long' });
+  if (sameDay(d, today)) return 'Today';
+  if (sameDay(d, addDays(today, -1))) return 'Yesterday';
+  return fmtDate(d, { weekday: 'short', month: 'short', day: 'numeric' });
 };
 function weekNumber(d) {
   const x = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
@@ -89,7 +90,7 @@ function weekNumber(d) {
 const fmtClock = sec => { sec = Math.max(0, Math.floor(sec)); return `${Math.floor(sec / 3600)}:${pad(Math.floor(sec / 60) % 60)}:${pad(sec % 60)}`; };
 const fmtHMS = sec => { sec = Math.max(0, Math.round(sec)); return `${pad(Math.floor(sec / 3600))}:${pad(Math.floor(sec / 60) % 60)}:${pad(sec % 60)}`; };
 const fmtHM = sec => { const m = Math.round(Math.max(0, sec) / 60); return `${Math.floor(m / 60)}:${pad(m % 60)}`; };
-const fmtDec = sec => (sec / 3600).toLocaleString('nl-BE', { maximumFractionDigits: 2 });
+const fmtDec = sec => (sec / 3600).toLocaleString('en-US', { maximumFractionDigits: 2 });
 
 const entryStart = e => new Date(e.start_at);
 const entryEnd = e => e.end_at ? new Date(e.end_at) : new Date();
@@ -113,7 +114,7 @@ function perDay(entries, from, days) {
 const projectOf = e => byId(S.projects, e.project_id);
 const profileOf = id => byId(S.profiles, id);
 // Geïmporteerde uren van iemand zonder account hebben user_id = null en een naam/e-mail uit Clockify
-const entryUserName = e => profileOf(e.user_id)?.full_name || (e.import_name || e.import_email ? `${e.import_name || e.import_email} (nog geen account)` : '');
+const entryUserName = e => profileOf(e.user_id)?.full_name || (e.import_name || e.import_email ? `${e.import_name || e.import_email} (no account yet)` : '');
 const clientOf = p => p ? byId(S.clients, p.client_id) : null;
 const byName = (a, b) => a.name.localeCompare(b.name);
 // Tags: enkel bewaren als schema-v2 uitgevoerd is (anders bestaat de kolom tag_ids nog niet)
@@ -125,20 +126,20 @@ const userColor = id => PROJECT_COLORS[[...String(id)].reduce((a, c) => a + c.ch
 const avatar = p => `<span class="avatar" style="background:${userColor(p?.id)}" aria-hidden="true">${esc(initials(p?.full_name || p?.email))}</span>`;
 const projLabel = p => p
   ? `<span class="proj"><span class="dot" style="background:${esc(p.color)}"></span>${esc(p.name)}${clientOf(p) ? `<span class="muted"> · ${esc(clientOf(p).name)}</span>` : ''}</span>`
-  : `<span class="proj muted"><span class="dot" style="background:${NO_PROJECT_COLOR}"></span>Geen project</span>`;
+  : `<span class="proj muted"><span class="dot" style="background:${NO_PROJECT_COLOR}"></span>No project</span>`;
 
-function projectOptions(selected, { includeArchived = false, emptyLabel = 'Geen project' } = {}) {
+function projectOptions(selected, { includeArchived = false, emptyLabel = 'No project' } = {}) {
   const list = S.projects.filter(p => includeArchived || !p.archived || p.id === selected);
   const groups = new Map();
   for (const p of list) {
-    const c = clientOf(p)?.name || 'Zonder klant';
+    const c = clientOf(p)?.name || 'Without client';
     if (!groups.has(c)) groups.set(c, []);
     groups.get(c).push(p);
   }
   let html = `<option value="">${esc(emptyLabel)}</option>`;
   for (const [c, ps] of [...groups].sort((a, b) => a[0].localeCompare(b[0]))) {
     html += `<optgroup label="${esc(c)}">` + ps.sort((a, b) => a.name.localeCompare(b.name))
-      .map(p => `<option value="${p.id}" ${p.id === selected ? 'selected' : ''}>${esc(p.name)}${p.archived ? ' (gearchiveerd)' : ''}</option>`).join('') + '</optgroup>';
+      .map(p => `<option value="${p.id}" ${p.id === selected ? 'selected' : ''}>${esc(p.name)}${p.archived ? ' (archived)' : ''}</option>`).join('') + '</optgroup>';
   }
   return html;
 }
@@ -246,17 +247,17 @@ async function init() {
 async function start() {
   if (S.recovery) return renderAuth('reset');
   if (!S.session) return renderAuth('login');
-  app.innerHTML = '<div class="auth"><div class="muted">Laden…</div></div>';
+  app.innerHTML = '<div class="auth"><div class="muted">Loading…</div></div>';
   try {
     await loadBase();
-    if (!S.me) throw new Error('Geen profiel gevonden. Werd schema.sql uitgevoerd in Supabase?');
+    if (!S.me) throw new Error('No profile found. Was schema.sql run in Supabase?');
     if (!S.me.active) {
-      app.innerHTML = `<div class="auth"><div class="card"><div class="brand">${LOGO}Polyfy</div><p>Je account is gedeactiveerd. Neem contact op met een beheerder.</p><button class="btn" id="lo">Uitloggen</button></div></div>`;
+      app.innerHTML = `<div class="auth"><div class="card"><div class="brand">${LOGO}Polyfy</div><p>Your account has been deactivated. Please contact an admin.</p><button class="btn" id="lo">Log out</button></div></div>`;
       $('#lo').onclick = () => sb.auth.signOut();
       return;
     }
   } catch (err) {
-    app.innerHTML = `<div class="auth"><div class="card"><div class="brand">${LOGO}Polyfy</div><div class="err">${esc(err.message)}</div><p><button class="btn" id="lo">Uitloggen</button></p></div></div>`;
+    app.innerHTML = `<div class="auth"><div class="card"><div class="brand">${LOGO}Polyfy</div><div class="err">${esc(err.message)}</div><p><button class="btn" id="lo">Log out</button></p></div></div>`;
     $('#lo').onclick = () => sb.auth.signOut();
     return;
   }
@@ -267,30 +268,30 @@ async function start() {
 function renderSetup() {
   app.innerHTML = `<div class="setup card">
     <div class="brand">${LOGO}Polyfy</div>
-    <h2>Nog niet gekoppeld aan Supabase</h2>
+    <h2>Not connected to Supabase yet</h2>
     <ol>
-      <li>Maak een project aan op <a href="https://supabase.com" target="_blank" rel="noopener">supabase.com</a>.</li>
-      <li>Voer <code>supabase/schema.sql</code> uit in de SQL Editor.</li>
-      <li>Vul <code>SUPABASE_URL</code> en <code>SUPABASE_ANON_KEY</code> in <code>config.js</code> in.</li>
+      <li>Create a project on <a href="https://supabase.com" target="_blank" rel="noopener">supabase.com</a>.</li>
+      <li>Run <code>supabase/schema.sql</code> in the SQL Editor.</li>
+      <li>Fill in <code>SUPABASE_URL</code> and <code>SUPABASE_ANON_KEY</code> in <code>config.js</code>.</li>
     </ol>
-    <p class="muted">Zie <code>README.md</code> voor alle stappen.</p>
+    <p class="muted">See <code>README.md</code> for all steps.</p>
   </div>`;
 }
 
 function renderAuth(mode, msg = null) {
-  const titles = { login: 'Inloggen', signup: 'Account maken', forgot: 'Wachtwoord vergeten', reset: 'Nieuw wachtwoord' };
+  const titles = { login: 'Log in', signup: 'Sign up', forgot: 'Forgot password', reset: 'New password' };
   app.innerHTML = `<div class="auth"><div class="card">
     <div class="brand">${LOGO}Polyfy</div>
     <p class="muted" style="text-align:center;margin:0">${titles[mode]}</p>
     <form id="af">
       ${msg ? `<div class="${msg.ok ? 'ok' : 'err'}">${esc(msg.text)}</div>` : ''}
-      ${mode === 'signup' ? '<label class="field">Naam<input name="name" required autocomplete="name"></label>' : ''}
-      ${mode !== 'reset' ? '<label class="field">E-mail<input name="email" type="email" required autocomplete="email"></label>' : ''}
-      ${mode !== 'forgot' ? `<label class="field">${mode === 'reset' ? 'Nieuw wachtwoord' : 'Wachtwoord'}<input name="pw" type="password" required minlength="6" autocomplete="${mode === 'login' ? 'current-password' : 'new-password'}"></label>` : ''}
-      <button class="btn primary" type="submit">${{ login: 'Inloggen', signup: 'Account maken', forgot: 'Stuur resetlink', reset: 'Opslaan' }[mode]}</button>
+      ${mode === 'signup' ? '<label class="field">Name<input name="name" required autocomplete="name"></label>' : ''}
+      ${mode !== 'reset' ? '<label class="field">Email<input name="email" type="email" required autocomplete="email"></label>' : ''}
+      ${mode !== 'forgot' ? `<label class="field">${mode === 'reset' ? 'New password' : 'Password'}<input name="pw" type="password" required minlength="6" autocomplete="${mode === 'login' ? 'current-password' : 'new-password'}"></label>` : ''}
+      <button class="btn primary" type="submit">${{ login: 'Log in', signup: 'Sign up', forgot: 'Send reset link', reset: 'Save' }[mode]}</button>
       <div class="row small" style="justify-content:space-between">
-        ${mode === 'login' ? '<button type="button" class="linkbtn" data-m="signup">Account maken</button><button type="button" class="linkbtn" data-m="forgot">Wachtwoord vergeten?</button>' : ''}
-        ${mode === 'signup' || mode === 'forgot' ? '<button type="button" class="linkbtn" data-m="login">Terug naar inloggen</button>' : ''}
+        ${mode === 'login' ? '<button type="button" class="linkbtn" data-m="signup">Sign up</button><button type="button" class="linkbtn" data-m="forgot">Forgot password?</button>' : ''}
+        ${mode === 'signup' || mode === 'forgot' ? '<button type="button" class="linkbtn" data-m="login">Back to log in</button>' : ''}
       </div>
     </form></div></div>`;
   $$('[data-m]').forEach(b => b.onclick = () => renderAuth(b.dataset.m));
@@ -305,14 +306,14 @@ function renderAuth(mode, msg = null) {
       } else if (mode === 'signup') {
         const email = String(f.get('email')).trim();
         const dom = (CFG.ALLOWED_EMAIL_DOMAIN || '').trim().toLowerCase();
-        if (dom && !email.toLowerCase().endsWith('@' + dom)) throw new Error(`Gebruik je e-mailadres van @${dom}.`);
+        if (dom && !email.toLowerCase().endsWith('@' + dom)) throw new Error(`Please use your @${dom} email address.`);
         const { data, error } = await sb.auth.signUp({ email, password: f.get('pw'), options: { data: { full_name: f.get('name') }, emailRedirectTo: location.origin + location.pathname } });
         if (error) throw error;
-        if (!data.session) renderAuth('login', { ok: true, text: 'Check je mailbox om je account te bevestigen.' });
+        if (!data.session) renderAuth('login', { ok: true, text: 'Check your inbox to confirm your account.' });
       } else if (mode === 'forgot') {
         const { error } = await sb.auth.resetPasswordForEmail(f.get('email'), { redirectTo: location.origin + location.pathname });
         if (error) throw error;
-        renderAuth('login', { ok: true, text: 'Als dit adres bestaat, ontvang je een mail met een resetlink.' });
+        renderAuth('login', { ok: true, text: 'If this address exists, you will receive an email with a reset link.' });
       } else if (mode === 'reset') {
         const { error } = await sb.auth.updateUser({ password: f.get('pw') });
         if (error) throw error;
@@ -320,7 +321,7 @@ function renderAuth(mode, msg = null) {
         start();
       }
     } catch (err) {
-      renderAuth(mode, { text: err.message === 'Invalid login credentials' ? 'E-mail of wachtwoord klopt niet.' : err.message });
+      renderAuth(mode, { text: err.message === 'Invalid login credentials' ? 'Incorrect email or password.' : err.message });
     }
   };
 }
@@ -343,7 +344,7 @@ function renderShell() {
       <button class="btn icon ghost nav-toggle" id="nav-toggle" aria-label="Menu">${icon('menu')}</button>
       <div class="brand">${LOGO}<span>Polyfy</span></div>
       <span class="ws">POLYGON</span>
-      <button class="me" id="me-btn" title="${esc(S.me.full_name || S.me.email)} · Profiel & instellingen" aria-label="Profiel & instellingen">${avatar(S.me)}</button>
+      <button class="me" id="me-btn" title="${esc(S.me.full_name || S.me.email)} · Profile settings" aria-label="Profile settings">${avatar(S.me)}</button>
     </header>
     <aside class="side">
       <nav class="nav">${navItems().map(([k, l, i, sec]) => `${sec ? `<div class="nav-sec">${sec}</div>` : ''}<a href="#${k}" data-nav="${k}">${icon(i)}<span>${l}</span>${k === 'tracker' ? '<span class="nav-clock num" id="nav-clock"></span>' : ''}</a>`).join('')}</nav>
@@ -414,16 +415,16 @@ function renderTimer() {
   if (man && !manual) { const now = new Date(); manual = { date: ymd(now), start: hm(now), end: hm(now) }; }
   bar.classList.toggle('running', !!r);
   bar.innerHTML = `
-    <input class="desc" id="t-desc" placeholder="Waar heb je aan gewerkt?" value="${esc(cur.description)}" aria-label="Omschrijving">
+    <input class="desc" id="t-desc" placeholder="What have you worked on?" value="${esc(cur.description)}" aria-label="Description">
     <button class="btn ghost projbtn" id="t-proj" title="Project">${projBtnHtml(cur.project_id)}</button>
     ${S.tagsReady ? `<button class="btn ghost tagbtn" id="t-tags" title="Tags">${tagBtnHtml(cur.tag_ids)}</button>` : ''}
-    <button class="billable-toggle ${cur.billable ? 'on' : ''}" id="t-bill" title="Factureerbaar" aria-pressed="${!!cur.billable}">€</button>
-    ${man ? `<span class="tb-times"><input class="hm num" id="t-start" value="${manual.start}" aria-label="Start" inputmode="numeric"><span class="muted">–</span><input class="hm num" id="t-end" value="${manual.end}" aria-label="Einde" inputmode="numeric"><input type="date" id="t-date" value="${manual.date}" aria-label="Datum"></span>
-        <input class="clock num tb-dur" id="t-dur" aria-label="Duur">
-        <button class="btn start" id="t-add">Toevoegen</button>`
+    <button class="billable-toggle ${cur.billable ? 'on' : ''}" id="t-bill" title="Billable" aria-pressed="${!!cur.billable}">€</button>
+    ${man ? `<span class="tb-times"><input class="hm num" id="t-start" value="${manual.start}" aria-label="Start" inputmode="numeric"><span class="muted">–</span><input class="hm num" id="t-end" value="${manual.end}" aria-label="End" inputmode="numeric"><input type="date" id="t-date" value="${manual.date}" aria-label="Date"></span>
+        <input class="clock num tb-dur" id="t-dur" aria-label="Duration">
+        <button class="btn start" id="t-add">Add</button>`
       : `<span class="clock num" id="t-clock">${fmtHMS(r ? entrySec(r) : 0)}</span>
         <button class="btn ${r ? 'stop' : 'start'}" id="t-go">${r ? 'Stop' : 'Start'}</button>`}
-    <div class="modes"><button class="${man ? '' : 'on'}" data-mode="timer" title="Timer" aria-label="Timer">${icon('clock')}</button><button class="${man ? 'on' : ''}" data-mode="manual" title="Manueel" aria-label="Manueel">${icon('list')}</button></div>`;
+    <div class="modes"><button class="${man ? '' : 'on'}" data-mode="timer" title="Timer mode" aria-label="Timer mode">${icon('clock')}</button><button class="${man ? 'on' : ''}" data-mode="manual" title="Manual mode" aria-label="Manual mode">${icon('list')}</button></div>`;
 
   const desc = $('#t-desc'), bill = $('#t-bill');
   const saveRunning = async patch => {
@@ -465,7 +466,7 @@ function renderTimer() {
   $$('.hm', bar).forEach(i => { i.onfocus = () => i.select(); i.onkeydown = e => { if (e.key === 'Enter') i.blur(); }; });
   $('#t-dur').onchange = () => {
     const sec = parseDur($('#t-dur').value);
-    if (sec == null || sec > 24 * 3600) { toast('Geef een duur in zoals 1:30 of 1,5 (max. 24 uur).', true); return showDur(); }
+    if (sec == null || sec > 24 * 3600) { toast('Enter a duration like 1:30 or 1.5 (max. 24 hours).', true); return showDur(); }
     const { s } = times(); $('#t-end').value = hm(new Date(s.getTime() + sec * 1000)); keep(); showDur();
   };
   $('#t-dur').onkeydown = e => { if (e.key === 'Enter') e.target.blur(); };
@@ -474,7 +475,7 @@ function renderTimer() {
 
   async function addManual() {
     const { s, e } = times();
-    if (e - s < 60000) return toast('Geef een start- en eindtijd in.', true);
+    if (e - s < 60000) return toast('Enter a start and end time.', true);
     const { error } = await sb.from('time_entries').insert({
       user_id: S.me.id, description: desc.value.trim(), project_id: cur.project_id || null, billable: bill.classList.contains('on'),
       start_at: s.toISOString(), end_at: e.toISOString(), ...tagField(draft.tag_ids)
@@ -482,7 +483,7 @@ function renderTimer() {
     if (error) return fail(error);
     draft = { description: '', project_id: '', billable: true, tag_ids: [] };
     manual = { date: manual.date, start: hm(e), end: hm(e) };
-    toast('Registratie toegevoegd'); renderTimer(); refreshPage();
+    toast('Time entry added'); renderTimer(); refreshPage();
   }
 }
 
@@ -531,8 +532,8 @@ document.addEventListener('mousedown', e => { const m = $('#menu'); if (m && !m.
 addEventListener('scroll', e => { if (!e.target.closest?.('#menu')) closeMenu(); }, true);
 
 // Keuzelijst met zoekveld. items: [{ id, label, dot?, group? }]; id '' = "alle"/"geen".
-function pickFrom(anchor, items, current, onPick, { placeholder = 'Zoeken…', emptyLabel = null, cls = '' } = {}) {
-  openMenu(anchor, `<input placeholder="${esc(placeholder)}" aria-label="Zoeken"><div class="list"></div>`, m => {
+function pickFrom(anchor, items, current, onPick, { placeholder = 'Search…', emptyLabel = null, cls = '' } = {}) {
+  openMenu(anchor, `<input placeholder="${esc(placeholder)}" aria-label="Search"><div class="list"></div>`, m => {
     const inp = $('input', m), list = $('.list', m);
     const draw = () => {
       const q = inp.value.trim().toLowerCase();
@@ -542,22 +543,22 @@ function pickFrom(anchor, items, current, onPick, { placeholder = 'Zoeken…', e
         if (x.group !== undefined && x.group !== grp) { grp = x.group; html += `<div class="mh">${esc(grp)}</div>`; }
         html += `<button class="mi ${x.id === current ? 'on' : ''}" data-v="${esc(x.id)}">${x.dot ? `<span class="dot" style="background:${esc(x.dot)}"></span>` : ''}${esc(x.label)}${x.extra ? ` <span class="muted">${esc(x.extra)}</span>` : ''}</button>`;
       }
-      list.innerHTML = html || '<div class="muted small" style="padding:6px 8px">Niets gevonden.</div>';
+      list.innerHTML = html || '<div class="muted small" style="padding:6px 8px">No results.</div>';
       $$('[data-v]', list).forEach(b => b.onclick = () => { closeMenu(); onPick(b.dataset.v || null); });
     };
     inp.oninput = draw; draw();
   }, cls);
 }
 // Project kiezen, gegroepeerd per klant (zoals Clockify)
-function pickProject(anchor, current, onPick, { emptyLabel = 'Geen project', includeArchived = false } = {}) {
+function pickProject(anchor, current, onPick, { emptyLabel = 'No project', includeArchived = false } = {}) {
   const items = S.projects.filter(p => includeArchived || !p.archived || p.id === current)
-    .map(p => ({ id: p.id, label: p.name, dot: p.color, group: clientOf(p)?.name || 'Zonder klant', extra: p.archived ? '(gearchiveerd)' : '' }))
+    .map(p => ({ id: p.id, label: p.name, dot: p.color, group: clientOf(p)?.name || 'Without client', extra: p.archived ? '(archived)' : '' }))
     .sort((a, b) => a.group.localeCompare(b.group) || a.label.localeCompare(b.label));
-  pickFrom(anchor, items, current, onPick, { placeholder: 'Zoek project of klant…', emptyLabel, cls: 'wide' });
+  pickFrom(anchor, items, current, onPick, { placeholder: 'Search project or client', emptyLabel, cls: 'wide' });
 }
 
 // ---------- Periodekiezer (zoals "This week" met vorige/volgende) ----------
-const RANGES = [['today', 'Vandaag'], ['yesterday', 'Gisteren'], ['week', 'Deze week'], ['lastweek', 'Vorige week'], ['month', 'Deze maand'], ['lastmonth', 'Vorige maand'], ['year', 'Dit jaar'], ['lastyear', 'Vorig jaar']];
+const RANGES = [['today', 'Today'], ['yesterday', 'Yesterday'], ['week', 'This week'], ['lastweek', 'Last week'], ['month', 'This month'], ['lastmonth', 'Last month'], ['year', 'This year'], ['lastyear', 'Last year']];
 // [van, tot (exclusief)]
 function rangeOf(k) {
   const now = new Date(), t = startOfDay(now), wk = startOfWeek(now), mo = startOfMonth(now), y = now.getFullYear(), m = now.getMonth();
@@ -568,7 +569,7 @@ function rangeLabel(a, b) {
   for (const [k, l] of RANGES) { const [x, y] = rangeOf(k); if (+x === +a && +y === +b) return l; }
   const last = addDays(b, -1);
   return sameDay(a, last) ? fmtDate(a, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })
-    : `${fmtDate(a, { day: 'numeric', month: 'short' })} – ${fmtDate(last, { day: 'numeric', month: 'short', year: 'numeric' })}`;
+    : `${fmtDate(a, { day: 'numeric', month: 'short' })} - ${fmtDate(last, { day: 'numeric', month: 'short', year: 'numeric' })}`;
 }
 // Hele maanden/jaren verschuiven per maand, anders per lengte van de periode
 function shiftRange(a, b, dir) {
@@ -579,14 +580,14 @@ function shiftRange(a, b, dir) {
   const n = Math.round((b - a) / DAY_MS);
   return [addDays(a, dir * n), addDays(b, dir * n)];
 }
-const rangeHtml = (a, b) => `<div class="range"><button class="btn rlbl" data-r="pick">${icon('cal')}<span>${esc(rangeLabel(a, b))}</span></button><button class="btn icon" data-r="-1" aria-label="Vorige periode">${icon('left')}</button><button class="btn icon" data-r="1" aria-label="Volgende periode">${icon('right')}</button></div>`;
+const rangeHtml = (a, b) => `<div class="range"><button class="btn rlbl" data-r="pick">${icon('cal')}<span>${esc(rangeLabel(a, b))}</span></button><button class="btn icon" data-r="-1" aria-label="Previous period">${icon('left')}</button><button class="btn icon" data-r="1" aria-label="Next period">${icon('right')}</button></div>`;
 function bindRange(root, a, b, set) {
   $$('.range [data-r]', root).forEach(btn => btn.onclick = () => {
     if (btn.dataset.r !== 'pick') return set(...shiftRange(a, b, Number(btn.dataset.r)));
     openMenu(btn, `${RANGES.map(([k, l]) => `<button class="mi" data-k="${k}">${l}</button>`).join('')}
-      <div class="mh">Aangepast</div>
-      <div class="row" style="padding:2px 8px;flex-wrap:nowrap"><input type="date" id="rg-a" value="${ymd(a)}" aria-label="Van"><input type="date" id="rg-b" value="${ymd(addDays(b, -1))}" aria-label="Tot"></div>
-      <div style="padding:6px 8px"><button class="btn primary" id="rg-ok" style="width:100%">Toepassen</button></div>`, m => {
+      <div class="mh">Custom</div>
+      <div class="row" style="padding:2px 8px;flex-wrap:nowrap"><input type="date" id="rg-a" value="${ymd(a)}" aria-label="From"><input type="date" id="rg-b" value="${ymd(addDays(b, -1))}" aria-label="To"></div>
+      <div style="padding:6px 8px"><button class="btn primary" id="rg-ok" style="width:100%">Apply</button></div>`, m => {
       $$('[data-k]', m).forEach(x => x.onclick = () => { closeMenu(); set(...rangeOf(x.dataset.k)); });
       $('#rg-ok', m).onclick = () => {
         const p = $('#rg-a', m).value, q = $('#rg-b', m).value; if (!p || !q) return;
@@ -616,7 +617,7 @@ function openTagPop(anchor, ids, onChange) {
   let sel = [...ids];
   const pop = document.createElement('div');
   pop.className = 'tagpop'; pop.id = 'tagpop'; pop.anchor = anchor;
-  pop.innerHTML = '<input placeholder="Zoek of maak een tag…" aria-label="Tag zoeken"><div class="list"></div>';
+  pop.innerHTML = '<input placeholder="Add/Search tags" aria-label="Search tags"><div class="list"></div>';
   document.body.appendChild(pop);
   const r = anchor.getBoundingClientRect();
   pop.style.left = Math.max(8, Math.min(r.left, innerWidth - pop.offsetWidth - 8)) + 'px';
@@ -633,8 +634,8 @@ function openTagPop(anchor, ids, onChange) {
     const q = inp.value.trim().toLowerCase();
     const tags = S.tags.filter(t => (!t.archived || sel.includes(t.id)) && t.name.toLowerCase().includes(q));
     list.innerHTML = tags.map(t => `<label class="check"><input type="checkbox" value="${t.id}" ${sel.includes(t.id) ? 'checked' : ''}>${esc(t.name)}</label>`).join('')
-      + (q && !S.tags.some(t => t.name.toLowerCase() === q) ? `<button type="button" class="btn ghost" data-new>${icon('plus')}Tag "${esc(inp.value.trim())}" maken</button>` : '')
-      + (!tags.length && !q ? '<div class="muted small">Nog geen tags. Typ om er een te maken.</div>' : '');
+      + (q && !S.tags.some(t => t.name.toLowerCase() === q) ? `<button type="button" class="btn ghost" data-new>${icon('plus')}Create tag "${esc(inp.value.trim())}"</button>` : '')
+      + (!tags.length && !q ? '<div class="muted small">No tags yet. Type to create one.</div>' : '');
     $$('input[type=checkbox]', list).forEach(c => c.onchange = () => set(c.checked ? [...sel, c.value] : sel.filter(x => x !== c.value)));
     const nb = $('[data-new]', list); if (nb) nb.onclick = create;
   };
@@ -659,7 +660,7 @@ function openModal(title, bodyHtml, footHtml) {
   const bg = document.createElement('div');
   bg.className = 'modal-bg'; bg.id = 'modal';
   bg.innerHTML = `<div class="modal" role="dialog" aria-modal="true" aria-label="${esc(title)}">
-    <div class="modal-head"><h2>${esc(title)}</h2><button class="btn icon ghost" data-close aria-label="Sluiten">${icon('x')}</button></div>
+    <div class="modal-head"><h2>${esc(title)}</h2><button class="btn icon ghost" data-close aria-label="Close">${icon('x')}</button></div>
     <div class="modal-body">${bodyHtml}</div>
     <div class="modal-foot">${footHtml}</div></div>`;
   document.body.appendChild(bg);
@@ -685,31 +686,31 @@ function openEntryModal(entry, preset = {}) {
   const running = entry && !entry.end_at;
   const canEditUser = isAdmin() && !entry;
   let tagIds = [...(e.tag_ids || preset.tag_ids || [])];
-  const m = openModal(entry ? 'Registratie bewerken' : 'Registratie toevoegen', `
-    <label class="field">Omschrijving<input id="m-desc" value="${esc(e.description)}" placeholder="Waar werkte je aan?"></label>
+  const m = openModal(entry ? 'Edit time entry' : 'Add time entry', `
+    <label class="field">Description<input id="m-desc" value="${esc(e.description)}" placeholder="What have you worked on?"></label>
     <label class="field">Project<select id="m-proj">${projectOptions(e.project_id || '')}</select></label>
     ${S.tagsReady ? `<div class="field">Tags<button type="button" class="btn tagbtn" id="m-tags" style="justify-content:flex-start">${tagBtnHtml(tagIds)}</button></div>` : ''}
-    ${canEditUser ? `<label class="field">Medewerker<select id="m-user">${S.profiles.filter(p => p.active).map(p => `<option value="${p.id}" ${p.id === e.user_id ? 'selected' : ''}>${esc(p.full_name || p.email)}</option>`).join('')}</select></label>` : ''}
+    ${canEditUser ? `<label class="field">Team member<select id="m-user">${S.profiles.filter(p => p.active).map(p => `<option value="${p.id}" ${p.id === e.user_id ? 'selected' : ''}>${esc(p.full_name || p.email)}</option>`).join('')}</select></label>` : ''}
     <div class="grid2">
-      <label class="field">Datum<input type="date" id="m-date" value="${ymd(st)}" required></label>
+      <label class="field">Date<input type="date" id="m-date" value="${ymd(st)}" required></label>
       <div class="grid2" style="gap:8px">
-        <label class="field">Start<input type="time" id="m-start" value="${hm(st)}" required></label>
-        <label class="field">Einde${running ? '<input disabled value="loopt nog">' : `<input type="time" id="m-end" value="${en ? hm(en) : ''}" required>`}</label>
+        <label class="field">Start<input class="num" id="m-start" value="${hm(st)}" inputmode="numeric" required></label>
+        <label class="field">End${running ? '<input disabled value="running">' : `<input class="num" id="m-end" value="${en ? hm(en) : ''}" inputmode="numeric" required>`}</label>
       </div>
     </div>
     <div class="row" style="justify-content:space-between">
-      <label class="check"><input type="checkbox" id="m-bill" ${e.billable ? 'checked' : ''}> Factureerbaar</label>
-      <span class="muted">Duur: <b class="num" id="m-dur">–</b></span>
+      <label class="check"><input type="checkbox" id="m-bill" ${e.billable ? 'checked' : ''}> Billable</label>
+      <span class="muted">Duration: <b class="num" id="m-dur">–</b></span>
     </div>`,
-    `<div>${entry ? `<button class="btn danger" id="m-del">${icon('trash')}Verwijderen</button>` : ''}</div>
-     <div class="row"><button class="btn" data-close>Annuleren</button><button class="btn primary" id="m-save">Opslaan</button></div>`);
+    `<div>${entry ? `<button class="btn danger" id="m-del">${icon('trash')}Delete</button>` : ''}</div>
+     <div class="row"><button class="btn" data-close>Cancel</button><button class="btn primary" id="m-save">Save</button></div>`);
 
   const times = () => {
     const day = parseYmd($('#m-date').value || ymd(st));
-    const [sh, sm] = ($('#m-start').value || '00:00').split(':').map(Number);
+    const [sh, sm] = parseHM($('#m-start').value) || [0, 0];
     const s = new Date(day); s.setHours(sh, sm, 0, 0);
     if (running) return { s, en: null };
-    const [eh, em] = ($('#m-end').value || '00:00').split(':').map(Number);
+    const [eh, em] = parseHM($('#m-end').value) || [0, 0];
     let en2 = new Date(day); en2.setHours(eh, em, 0, 0);
     if (en2 <= s) en2 = addDays(en2, 1); // eindigt na middernacht
     return { s, en: en2 };
@@ -721,7 +722,7 @@ function openEntryModal(entry, preset = {}) {
 
   $('#m-save').onclick = async () => {
     const { s, en: x } = times();
-    if (x && x - s > 24 * 3600000) return toast('Een registratie kan maximaal 24 uur duren.', true);
+    if (x && x - s > 24 * 3600000) return toast('A time entry can be at most 24 hours long.', true);
     const row = {
       description: $('#m-desc').value.trim(), project_id: $('#m-proj').value || null,
       billable: $('#m-bill').checked, start_at: s.toISOString(), ...tagField(tagIds)
@@ -731,7 +732,7 @@ function openEntryModal(entry, preset = {}) {
     const q = entry ? sb.from('time_entries').update(row).eq('id', entry.id) : sb.from('time_entries').insert(row);
     const { error } = await q;
     if (error) return fail(error);
-    closeModal(); toast(entry ? 'Registratie bijgewerkt' : 'Registratie toegevoegd');
+    closeModal(); toast(entry ? 'Time entry updated' : 'Time entry added');
     if (running) { S.running = { ...S.running, ...row }; renderTimer(); }
     refreshPage();
   };
@@ -739,21 +740,21 @@ function openEntryModal(entry, preset = {}) {
 }
 
 async function deleteEntry(entry) {
-  if (!confirm('Deze registratie verwijderen?')) return;
+  if (!confirm('Delete this time entry?')) return;
   const { error } = await sb.from('time_entries').delete().eq('id', entry.id);
   if (error) return fail(error);
   if (S.running?.id === entry.id) { S.running = null; renderTimer(); }
-  closeModal(); toast('Registratie verwijderd'); refreshPage();
+  closeModal(); toast('Time entry deleted'); refreshPage();
 }
 
 function openProfileModal() {
   const theme = applyTheme();
-  const m = openModal('Profiel & instellingen', `
-    <div class="row">${avatar(S.me)}<div><div style="font-weight:600">${esc(S.me.email)}</div><div class="muted small">${isAdmin() ? 'Beheerder' : 'Medewerker'}</div></div></div>
-    <label class="field">Naam<input id="p-name" value="${esc(S.me.full_name)}"></label>
-    <label class="field">Nieuw wachtwoord <span class="muted">(leeg laten om niet te wijzigen)</span><input id="p-pw" type="password" minlength="6" autocomplete="new-password"></label>
-    <div class="field">Weergave<div class="seg" id="p-theme">${[['system', 'Systeem'], ['light', 'Licht'], ['dark', 'Donker']].map(([k, l]) => `<button type="button" data-t="${k}" class="${theme === k ? 'on' : ''}">${l}</button>`).join('')}</div></div>`,
-    `<button class="btn" id="p-out">${icon('logout')}Uitloggen</button><div class="row"><button class="btn" data-close>Annuleren</button><button class="btn primary" id="p-save">Opslaan</button></div>`);
+  const m = openModal('Profile settings', `
+    <div class="row">${avatar(S.me)}<div><div style="font-weight:600">${esc(S.me.email)}</div><div class="muted small">${isAdmin() ? 'Admin' : 'Member'}</div></div></div>
+    <label class="field">Name<input id="p-name" value="${esc(S.me.full_name)}"></label>
+    <label class="field">New password <span class="muted">(leave empty to keep the current one)</span><input id="p-pw" type="password" minlength="6" autocomplete="new-password"></label>
+    <div class="field">Theme<div class="seg" id="p-theme">${[['system', 'System'], ['light', 'Light'], ['dark', 'Dark']].map(([k, l]) => `<button type="button" data-t="${k}" class="${theme === k ? 'on' : ''}">${l}</button>`).join('')}</div></div>`,
+    `<button class="btn" id="p-out">${icon('logout')}Log out</button><div class="row"><button class="btn" data-close>Cancel</button><button class="btn primary" id="p-save">Save</button></div>`);
   $$('#p-theme button', m).forEach(b => b.onclick = () => {
     try { localStorage.setItem('polyfy-theme', b.dataset.t); } catch (_) {}
     applyTheme(); $$('#p-theme button', m).forEach(x => x.classList.toggle('on', x === b)); refreshPage();
@@ -769,7 +770,7 @@ function openProfileModal() {
       }
       const pw = $('#p-pw').value;
       if (pw) { const { error } = await sb.auth.updateUser({ password: pw }); if (error) throw error; }
-      closeModal(); toast('Profiel opgeslagen'); renderShell(); route();
+      closeModal(); toast('Profile saved'); renderShell(); route();
     } catch (err) { fail(err); }
   };
 }
@@ -793,11 +794,11 @@ function barChart(el, data, { height = 220, showValues = true, color = 'var(--ba
     const ticks = 4, band = iw / data.length;
     const bw = Math.max(4, Math.min(44, band * 0.62));
     const labelEvery = Math.ceil(data.length / Math.max(1, Math.floor(iw / 44)));
-    let s = `<svg width="${W}" height="${H}" role="img" aria-label="Staafdiagram van geregistreerde uren">`;
+    let s = `<svg width="${W}" height="${H}" role="img" aria-label="Bar chart of tracked time">`;
     for (let i = 0; i <= ticks; i++) {
       const y = padT + ih - (ih * i) / ticks;
       s += `<line class="${i === 0 ? 'baseline' : 'gridline'}" x1="${padL}" x2="${W - padR}" y1="${y}" y2="${y}"/>`;
-      s += `<g class="axis"><text x="${padL - 6}" y="${y + 4}" text-anchor="end">${(max * i / ticks).toLocaleString('nl-BE')}u</text></g>`;
+      s += `<g class="axis"><text x="${padL - 6}" y="${y + 4}" text-anchor="end">${(max * i / ticks).toLocaleString('en-US')}h</text></g>`;
     }
     data.forEach((d, i) => {
       const cx = padL + band * i + band / 2;
@@ -828,7 +829,7 @@ function donut(rows, total, size = 220) {
       stroke-dasharray="${len} ${C - len}" stroke-dashoffset="${-off}" transform="rotate(-90 ${size / 2} ${size / 2})" data-tip="<b>${esc(r.name)}</b><br>${fmtHMS(r.sec)} · ${Math.round(r.sec / total * 1000) / 10}%"/>`;
     off += len; return el;
   }).join('') : '';
-  return `<svg class="donut" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" role="img" aria-label="Verdeling">
+  return `<svg class="donut" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" role="img" aria-label="Distribution">
     <circle r="${R}" cx="${size / 2}" cy="${size / 2}" fill="none" stroke="var(--grid)" stroke-width="${w}"/>${segs}
     <text x="50%" y="50%" text-anchor="middle" dominant-baseline="central" class="donut-t">${fmtHMS(total)}</text></svg>`;
 }
@@ -839,7 +840,7 @@ const groupColor = (group, k, i) => group === 'project' ? (byId(S.projects, k)?.
 // Emmers voor grafieken: per dag (≤ 31 dagen), per week (≤ 120) of per maand
 function buckets(from, to) {
   const days = Math.round((to - from) / DAY_MS), out = [];
-  if (days <= 31) for (let i = 0; i < days; i++) { const d = addDays(from, i); out.push({ a: d, b: addDays(d, 1), label: days <= 7 ? fmtDate(d, { weekday: 'short', day: 'numeric', month: 'short' }) : String(d.getDate()), tip: fmtDate(d, { weekday: 'long', day: 'numeric', month: 'long' }) }); }
+  if (days <= 31) for (let i = 0; i < days; i++) { const d = addDays(from, i); out.push({ a: d, b: addDays(d, 1), label: days <= 7 ? fmtDate(d, { weekday: 'short', month: 'short', day: 'numeric' }) : String(d.getDate()), tip: fmtDate(d, { weekday: 'long', month: 'long', day: 'numeric' }) }); }
   else if (days <= 120) for (let d = startOfWeek(from); d < to; d = addDays(d, 7)) out.push({ a: new Date(Math.max(d, from)), b: new Date(Math.min(addDays(d, 7), to)), label: `W${weekNumber(d)}`, tip: `Week ${weekNumber(d)} (${fmtDate(d, { day: 'numeric', month: 'short' })})` });
   else for (let d = startOfMonth(from); d < to; d = new Date(d.getFullYear(), d.getMonth() + 1, 1)) out.push({ a: new Date(Math.max(d, from)), b: new Date(Math.min(new Date(d.getFullYear(), d.getMonth() + 1, 1), to)), label: fmtDate(d, { month: 'short' }), tip: fmtDate(d, { month: 'long', year: 'numeric' }) });
   return out;
@@ -874,21 +875,21 @@ async function renderTracker(page) {
     const a = addDays(wk0, -7 * i), b = addDays(a, 7);
     const wkEntries = entries.filter(e => entryStart(e) >= a && entryStart(e) < b);
     if (!wkEntries.length) continue;
-    const label = i === 0 ? 'Deze week' : i === 1 ? 'Vorige week' : `${fmtDate(a, { day: 'numeric', month: 'short' })} – ${fmtDate(addDays(a, 6), { day: 'numeric', month: 'short' })}`;
-    let html = `<div class="wk-head"><span>${esc(label)}</span><span class="muted small">Weektotaal: <b class="wk-tot num">${fmtHMS(wkEntries.reduce((t, e) => t + entrySec(e), 0))}</b></span></div>`;
+    const label = i === 0 ? 'This week' : i === 1 ? 'Last week' : `${fmtDate(a, { month: 'short', day: 'numeric' })} - ${fmtDate(addDays(a, 6), { month: 'short', day: 'numeric' })}`;
+    let html = `<div class="wk-head"><span>${esc(label)}</span><span class="muted small">Week total: <b class="wk-tot num">${fmtHMS(wkEntries.reduce((t, e) => t + entrySec(e), 0))}</b></span></div>`;
     for (let d = 6; d >= 0; d--) {
       const day = addDays(a, d), dayGroups = [...groups.values()].filter(g => sameDay(entryStart(g.items[0]), day));
       if (!dayGroups.length) continue;
       const dayTot = dayGroups.reduce((t, g) => t + g.items.reduce((u, e) => u + entrySec(e), 0), 0);
-      html += `<div class="card tday"><div class="tday-head"><span>${esc(fmtDayLong(day))}</span><span class="muted small">Totaal: <b class="num">${fmtHMS(dayTot)}</b></span></div>
+      html += `<div class="card tday"><div class="tday-head"><span>${esc(fmtDayLong(day))}</span><span class="muted small">Total: <b class="num">${fmtHMS(dayTot)}</b></span></div>
         ${dayGroups.map(g => trackRow(g) + (g.items.length > 1 && S.trk.open.has(g.key) ? g.items.map(e => trackRow({ key: g.key, items: [e] }, true)).join('') : '')).join('')}</div>`;
     }
     blocks.push(html);
   }
   page.innerHTML = `
     <div class="timerbar card" id="timerbar"></div>
-    ${blocks.join('') || '<div class="card empty">Nog geen registraties. Start de timer of voeg manueel uren toe.</div>'}
-    <div class="row" style="justify-content:center"><button class="btn" id="trk-more">Oudere registraties tonen</button></div>`;
+    ${blocks.join('') || '<div class="card empty">No time entries yet. Start the timer or add time manually.</div>'}
+    <div class="row" style="justify-content:center"><button class="btn" id="trk-more">Load more</button></div>`;
   renderTimer();
   bindTrackRows(page, groups, entries);
   $('#trk-more').onclick = () => { S.trk.weeks += 4; refreshPage(); };
@@ -900,17 +901,17 @@ function trackRow(g, child = false) {
   const first = new Date(Math.min(...g.items.map(entryStart))), last = new Date(Math.max(...g.items.map(entryEnd)));
   const tags = tagNames(e.tag_ids);
   return `<div class="te ${child ? 'child' : ''}" data-g="${esc(g.key)}" ${multi ? '' : `data-id="${e.id}"`}>
-    <span class="te-cnt">${multi ? `<button class="cnt ${S.trk.open.has(g.key) ? 'on' : ''}" data-act="toggle" title="${g.items.length} registraties">${g.items.length}</button>` : ''}</span>
-    <input class="te-desc" data-act="desc" value="${esc(e.description)}" placeholder="Omschrijving toevoegen" aria-label="Omschrijving">
+    <span class="te-cnt">${multi ? `<button class="cnt ${S.trk.open.has(g.key) ? 'on' : ''}" data-act="toggle" title="${g.items.length} time entries">${g.items.length}</button>` : ''}</span>
+    <input class="te-desc" data-act="desc" value="${esc(e.description)}" placeholder="Add description" aria-label="Description">
     <button class="te-proj" data-act="proj">${projBtnHtml(e.project_id)}</button>
     ${S.tagsReady ? `<button class="te-tags ${tags.length ? 'on' : ''}" data-act="tags" title="Tags">${tags.length ? tags.map(t => `<span class="tag t-blue">${esc(t)}</span>`).join('') : icon('tag')}</button>` : ''}
-    <button class="te-bill ${e.billable ? 'on' : ''}" data-act="bill" title="Factureerbaar">€</button>
-    <span class="te-times num">${multi ? `<span class="muted">${hm(first)} – ${e.end_at ? hm(last) : 'nu'}</span>`
-      : `<input class="num" data-act="start" value="${hm(entryStart(e))}" aria-label="Start" inputmode="numeric"><span class="muted">–</span>${running ? '<span class="muted">nu</span>' : `<input class="num" data-act="end" value="${hm(entryEnd(e))}" aria-label="Einde" inputmode="numeric">`}`}</span>
-    ${multi ? '<span class="te-ico"></span>' : `<button class="btn icon ghost te-ico" data-act="date" title="Datum wijzigen" aria-label="Datum wijzigen">${icon('cal')}</button>`}
-    <span class="te-dur num">${running && !multi ? '<span class="tag live">loopt</span>' : fmtHMS(sec)}</span>
-    <button class="btn icon ghost" data-act="play" title="Opnieuw starten" aria-label="Opnieuw starten">${icon('play')}</button>
-    <button class="btn icon ghost" data-act="more" title="Meer" aria-label="Meer">${icon('dots')}</button>
+    <button class="te-bill ${e.billable ? 'on' : ''}" data-act="bill" title="Billable">€</button>
+    <span class="te-times num">${multi ? `<span class="muted">${hm(first)} – ${e.end_at ? hm(last) : 'now'}</span>`
+      : `<input class="num" data-act="start" value="${hm(entryStart(e))}" aria-label="Start" inputmode="numeric"><span class="muted">–</span>${running ? '<span class="muted">now</span>' : `<input class="num" data-act="end" value="${hm(entryEnd(e))}" aria-label="End" inputmode="numeric">`}`}</span>
+    ${multi ? '<span class="te-ico"></span>' : `<button class="btn icon ghost te-ico" data-act="date" title="Change date" aria-label="Change date">${icon('cal')}</button>`}
+    <span class="te-dur num">${running && !multi ? '<span class="tag live">running</span>' : fmtHMS(sec)}</span>
+    <button class="btn icon ghost" data-act="play" title="Continue timer for this activity" aria-label="Continue">${icon('play')}</button>
+    <button class="btn icon ghost" data-act="more" title="More" aria-label="More">${icon('dots')}</button>
   </div>`;
 }
 
@@ -934,15 +935,15 @@ function bindTrackRows(root, groups, entries) {
       if (act === 'bill') el.onclick = () => save({ billable: !e.billable });
       if (act === 'start' || act === 'end') { el.onfocus = () => el.select(); el.onkeydown = ev => { if (ev.key === 'Enter') el.blur(); }; }
       if (act === 'start' || act === 'end') el.onchange = () => {
-        const t = parseHM(el.value); if (!t) { toast('Geef een tijd in zoals 9:30 of 0930.', true); return refreshPage(); }
+        const t = parseHM(el.value); if (!t) { toast('Enter a time like 9:30 or 0930.', true); return refreshPage(); }
         const [h, m] = t;
         const base = startOfDay(entryStart(e)), s = act === 'start' ? new Date(base.setHours(h, m)) : entryStart(e);
         let en = act === 'end' ? new Date(new Date(startOfDay(entryStart(e))).setHours(h, m)) : e.end_at ? entryEnd(e) : null;
         if (en && en <= s) en = addDays(en, 1);
-        if (en && en - s > 24 * 3600000) { toast('Een registratie kan maximaal 24 uur duren.', true); return refreshPage(); }
+        if (en && en - s > 24 * 3600000) { toast('A time entry can be at most 24 hours long.', true); return refreshPage(); }
         save({ start_at: s.toISOString(), ...(en ? { end_at: en.toISOString() } : {}) });
       };
-      if (act === 'date') el.onclick = () => openMenu(el, `<div style="padding:6px 8px"><input type="date" value="${ymd(entryStart(e))}" aria-label="Datum"></div>`, m => {
+      if (act === 'date') el.onclick = () => openMenu(el, `<div style="padding:6px 8px"><input type="date" value="${ymd(entryStart(e))}" aria-label="Date"></div>`, m => {
         $('input', m).onchange = ev => {
           const d = parseYmd(ev.target.value), shift = startOfDay(d) - startOfDay(entryStart(e));
           closeMenu(); save({ start_at: new Date(entryStart(e).getTime() + shift).toISOString(), ...(e.end_at ? { end_at: new Date(entryEnd(e).getTime() + shift).toISOString() } : {}) });
@@ -950,23 +951,23 @@ function bindTrackRows(root, groups, entries) {
       });
       if (act === 'play') el.onclick = () => startTimer(e);
       if (act === 'more') el.onclick = () => openMenu(el, items.length > 1
-        ? `<button class="mi" data-m="open">${S.trk.open.has(g.key) ? 'Inklappen' : 'Uitklappen'}</button><button class="mi danger" data-m="del">Alle ${items.length} verwijderen</button>`
-        : `<button class="mi" data-m="edit">Bewerken</button><button class="mi" data-m="dup">Dupliceren</button><button class="mi danger" data-m="del">Verwijderen</button>`, m => {
+        ? `<button class="mi" data-m="open">${S.trk.open.has(g.key) ? 'Collapse' : 'Expand'}</button><button class="mi danger" data-m="del">Delete all ${items.length}</button>`
+        : `<button class="mi" data-m="edit">Edit</button><button class="mi" data-m="dup">Duplicate</button><button class="mi danger" data-m="del">Delete</button>`, m => {
         $$('[data-m]', m).forEach(x => x.onclick = async () => {
           closeMenu();
           if (x.dataset.m === 'open') { S.trk.open.has(g.key) ? S.trk.open.delete(g.key) : S.trk.open.add(g.key); return refreshPage(); }
           if (x.dataset.m === 'edit') return openEntryModal(e);
           if (x.dataset.m === 'dup') {
-            if (!e.end_at) return toast('Een lopende timer kan je niet dupliceren.', true);
+            if (!e.end_at) return toast('A running timer cannot be duplicated.', true);
             const { error } = await sb.from('time_entries').insert({ user_id: e.user_id, description: e.description, project_id: e.project_id, billable: e.billable, start_at: e.start_at, end_at: e.end_at, ...tagField(e.tag_ids) });
             if (error) return fail(error);
-            toast('Registratie gedupliceerd'); return refreshPage();
+            toast('Time entry duplicated'); return refreshPage();
           }
-          if (!confirm(items.length > 1 ? `Deze ${items.length} registraties verwijderen?` : 'Deze registratie verwijderen?')) return;
+          if (!confirm(items.length > 1 ? `Delete these ${items.length} time entries?` : 'Delete this time entry?')) return;
           const { error } = await sb.from('time_entries').delete().in('id', ids);
           if (error) return fail(error);
           if (S.running && ids.includes(S.running.id)) { S.running = null; renderTimer(); }
-          toast('Verwijderd'); refreshPage();
+          toast('Deleted'); refreshPage();
         });
       });
     });
@@ -976,7 +977,7 @@ function bindTrackRows(root, groups, entries) {
 // =====================================================================
 // Dashboard (zoals Clockify: totaal, topproject/-klant, staven per dag, ring, top-activiteiten)
 // =====================================================================
-const DASH_GROUPS = [['project', 'Project'], ['client', 'Klant'], ['tag', 'Tag'], ['user', 'Medewerker']];
+const DASH_GROUPS = [['project', 'Project'], ['client', 'Client'], ['tag', 'Tag'], ['user', 'User']];
 async function renderDashboard(page) {
   const D = S.dash;
   if (!D.from) [D.from, D.to] = rangeOf('week');
@@ -998,17 +999,17 @@ async function renderDashboard(page) {
   page.innerHTML = `
     <div class="page-head"><h1>Dashboard</h1>
       <div class="row">
-        <select id="d-group" aria-label="Groeperen op">${DASH_GROUPS.filter(g => team || g[0] !== 'user').map(([k, l]) => `<option value="${k}" ${D.group === k ? 'selected' : ''}>${l}</option>`).join('')}</select>
-        ${isAdmin() ? `<select id="d-who" aria-label="Wie"><option value="me">Enkel ik</option><option value="team" ${team ? 'selected' : ''}>Team</option></select>` : ''}
+        <select id="d-group" aria-label="Group by">${DASH_GROUPS.filter(g => team || g[0] !== 'user').map(([k, l]) => `<option value="${k}" ${D.group === k ? 'selected' : ''}>${l}</option>`).join('')}</select>
+        ${isAdmin() ? `<select id="d-who" aria-label="Who"><option value="me">Only me</option><option value="team" ${team ? 'selected' : ''}>Team</option></select>` : ''}
         ${rangeHtml(D.from, D.to)}
       </div>
     </div>
     <div class="dash">
       <div class="card">
         <div class="kpis">
-          <div><div class="label">Totale tijd</div><div class="v num">${fmtHMS(total)}</div></div>
-          <div><div class="label">Topproject</div><div class="v sm">${topP ? esc(groupText(topP, 'project')) : '–'}</div></div>
-          <div><div class="label">Topklant</div><div class="v sm">${topC ? esc(groupText(topC, 'client')) : '–'}</div></div>
+          <div><div class="label">Total time</div><div class="v num">${fmtHMS(total)}</div></div>
+          <div><div class="label">Top project</div><div class="v sm">${topP ? esc(groupText(topP, 'project')) : '–'}</div></div>
+          <div><div class="label">Top client</div><div class="v sm">${topC ? esc(groupText(topC, 'client')) : '–'}</div></div>
         </div>
         <div class="card-body"><div class="chart" id="d-chart"></div></div>
         <div class="dash-split">
@@ -1017,13 +1018,13 @@ async function renderDashboard(page) {
             <div class="drow" data-tip="<b>${esc(r.name)}</b><br>${fmtHMS(r.sec)}">
               <span class="dn">${esc(r.name)}</span><span class="num">${fmtHMS(r.sec)}</span>
               <span class="track"><span style="width:${total ? r.sec / rows[0].sec * 100 : 0}%;background:${esc(r.color)}"></span></span>
-              <span class="num muted">${total ? (r.sec / total * 100).toFixed(2).replace('.', ',') : 0}%</span>
-            </div>`).join('') : '<div class="empty">Geen uren in deze periode.</div>'}</div>
+              <span class="num muted">${total ? (r.sec / total * 100).toFixed(2) : 0}%</span>
+            </div>`).join('') : '<div class="empty">No time tracked in this period.</div>'}</div>
         </div>
       </div>
       <div class="card side-list">
-        <div class="card-head"><h2>Meest geregistreerde activiteiten</h2><span class="muted small">Top 10</span></div>
-        ${top.length ? top.map(a => `<div class="act"><div class="desc"><div>${a.e.description ? esc(a.e.description) : '<span class="muted">(geen omschrijving)</span>'}</div><div class="small">${projLabel(projectOf(a.e))}</div></div><span class="num">${fmtHMS(a.sec)}</span></div>`).join('') : '<div class="empty">Nog niets.</div>'}
+        <div class="card-head"><h2>Most tracked activities</h2><span class="muted small">Top 10</span></div>
+        ${top.length ? top.map(a => `<div class="act"><div class="desc"><div>${a.e.description ? esc(a.e.description) : '<span class="muted">(no description)</span>'}</div><div class="small">${projLabel(projectOf(a.e))}</div></div><span class="num">${fmtHMS(a.sec)}</span></div>`).join('') : '<div class="empty">Nothing yet.</div>'}
       </div>
     </div>`;
 
@@ -1061,22 +1062,22 @@ async function renderCalendar(page) {
 
   page.innerHTML = `
     <div class="page-head">
-      <div class="row"><h1>Calendar</h1><div class="seg" id="c-mode"><button data-m="week" class="${nd === 7 ? 'on' : ''}">Week</button><button data-m="day" class="${nd === 1 ? 'on' : ''}">Dag</button></div></div>
+      <div class="row"><h1>Calendar</h1><div class="seg" id="c-mode"><button data-m="week" class="${nd === 7 ? 'on' : ''}">Week</button><button data-m="day" class="${nd === 1 ? 'on' : ''}">Day</button></div></div>
       <div class="row">
-        <div class="seg" id="c-zoom"><button data-z="-12" aria-label="Uitzoomen" ${HP <= 24 ? 'disabled' : ''}>−</button><button data-z="12" aria-label="Inzoomen" ${HP >= 96 ? 'disabled' : ''}>+</button></div>
-        ${isAdmin() ? `<button class="btn" id="c-user">${avatar(who)}<span>${esc(uid === S.me.id ? 'Ik' : who?.full_name || who?.email || '')}</span>${icon('down')}</button>` : ''}
+        <div class="seg" id="c-zoom"><button data-z="-12" aria-label="Zoom out" ${HP <= 24 ? 'disabled' : ''}>−</button><button data-z="12" aria-label="Zoom in" ${HP >= 96 ? 'disabled' : ''}>+</button></div>
+        ${isAdmin() ? `<button class="btn" id="c-user">${avatar(who)}<span>${esc(uid === S.me.id ? 'Me' : who?.full_name || who?.email || '')}</span>${icon('down')}</button>` : ''}
         ${rangeHtml(from, to)}
       </div>
     </div>
     <div class="card cal" style="--cols:${nd}">
       <div class="cal-dayhead" style="border-left:0"></div>
-      ${daily.map((sec, i) => { const d = addDays(from, i); return `<div class="cal-dayhead ${sameDay(d, today) ? 'today' : ''}"><div class="dn">${esc(fmtDate(d, { weekday: 'short', day: 'numeric', month: 'short' }))}</div><div class="tot num">${fmtHMS(sec)}</div></div>`; }).join('')}
+      ${daily.map((sec, i) => { const d = addDays(from, i); return `<div class="cal-dayhead ${sameDay(d, today) ? 'today' : ''}"><div class="dn">${esc(fmtDate(d, { weekday: 'short', month: 'short', day: 'numeric' }))}</div><div class="tot num">${fmtHMS(sec)}</div></div>`; }).join('')}
       <div class="cal-scroll" id="cal-scroll">
         <div class="cal-hours">${Array.from({ length: 24 }, (_, h) => `<div style="height:${HP}px">${h ? pad(h) + ':00' : ''}</div>`).join('')}</div>
         ${daily.map((_, i) => `<div class="cal-col ${sameDay(addDays(from, i), today) ? 'today' : ''}" data-day="${i}" style="height:${24 * HP}px;--hp:${HP}px"></div>`).join('')}
       </div>
     </div>
-    <div class="muted small">Klik op een leeg vak om een registratie toe te voegen, klik op een blok om te bewerken.</div>`;
+    <div class="muted small">Click an empty slot to add a time entry, click a block to edit it.</div>`;
 
   // Blokken per dag positioneren, met kolommen voor overlappende registraties
   $$('.cal-col', page).forEach(col => {
@@ -1100,9 +1101,9 @@ async function renderCalendar(page) {
       const p = projectOf(g.e), color = p ? p.color : NO_PROJECT_COLOR;
       const top = (g.s - d0) / 3600000 * HP, h = Math.max(18, (g.t - g.s) / 3600000 * HP - 2), w = 100 / g.ncol;
       return `<div class="cal-ev ${g.e.end_at ? '' : 'running'}" data-id="${g.e.id}" style="top:${top}px;height:${h}px;left:calc(${g.col * w}% + 2px);width:calc(${w}% - 4px);background:color-mix(in srgb, ${color} 18%, var(--surface));border-left:3px solid ${color}"
-        data-tip="<b>${esc(g.e.description || '(geen omschrijving)')}</b><br>${esc(p?.name || 'Geen project')}${tagNames(g.e.tag_ids).length ? '<br>' + esc(tagNames(g.e.tag_ids).join(', ')) : ''}<br>${hm(entryStart(g.e))} – ${g.e.end_at ? hm(entryEnd(g.e)) : 'nu'} · ${fmtHMS(entrySec(g.e))}">
-        <div class="t">${esc(g.e.description || p?.name || '(geen omschrijving)')}</div>
-        ${h > 34 ? `<div class="s">${esc(g.e.description ? p?.name || 'Geen project' : clientOf(p)?.name || '')} · ${fmtHM((g.t - g.s) / 1000)}</div>` : ''}
+        data-tip="<b>${esc(g.e.description || '(no description)')}</b><br>${esc(p?.name || 'No project')}${tagNames(g.e.tag_ids).length ? '<br>' + esc(tagNames(g.e.tag_ids).join(', ')) : ''}<br>${hm(entryStart(g.e))} – ${g.e.end_at ? hm(entryEnd(g.e)) : 'now'} · ${fmtHMS(entrySec(g.e))}">
+        <div class="t">${esc(g.e.description || p?.name || '(no description)')}</div>
+        ${h > 34 ? `<div class="s">${esc(g.e.description ? p?.name || 'No project' : clientOf(p)?.name || '')} · ${fmtHM((g.t - g.s) / 1000)}</div>` : ''}
       </div>`;
     }).join('');
     if (sameDay(d0, today)) {
@@ -1129,15 +1130,15 @@ async function renderCalendar(page) {
   });
   $$('#c-zoom button').forEach(b => b.onclick = () => { C.zoom = Math.min(96, Math.max(24, HP + Number(b.dataset.z))); refreshPage(); });
   bindRange(page, from, to, a => { C.from = C.mode === 'day' ? a : startOfWeek(a); refreshPage(); });
-  if ($('#c-user')) $('#c-user').onclick = () => pickFrom($('#c-user'), S.profiles.filter(p => p.active).map(p => ({ id: p.id, label: p.full_name || p.email, extra: p.id === S.me.id ? '(ik)' : '' })), uid,
-    v => { C.user = v || S.me.id; refreshPage(); }, { placeholder: 'Zoek collega…' });
+  if ($('#c-user')) $('#c-user').onclick = () => pickFrom($('#c-user'), S.profiles.filter(p => p.active).map(p => ({ id: p.id, label: p.full_name || p.email, extra: p.id === S.me.id ? '(you)' : '' })), uid,
+    v => { C.user = v || S.me.id; refreshPage(); }, { placeholder: 'Search teammates' });
 }
 
 // =====================================================================
 // Reports (Samenvatting / Gedetailleerd / Wekelijks, zoals Clockify)
 // =====================================================================
-const GROUPS = [['project', 'Project'], ['client', 'Klant'], ['user', 'Medewerker'], ['tag', 'Tag'], ['day', 'Dag'], ['description', 'Omschrijving']];
-const TABS = [['summary', 'Samenvatting'], ['detailed', 'Gedetailleerd'], ['weekly', 'Wekelijks']];
+const GROUPS = [['project', 'Project'], ['client', 'Client'], ['user', 'User'], ['tag', 'Tag'], ['day', 'Date'], ['description', 'Description']];
+const TABS = [['summary', 'Summary'], ['detailed', 'Detailed'], ['weekly', 'Weekly']];
 
 async function renderReports(page) {
   const R = S.rep;
@@ -1156,28 +1157,28 @@ async function renderReports(page) {
   const groups = GROUPS.filter(g => isAdmin() || g[0] !== 'user').filter(g => S.tagsReady || g[0] !== 'tag');
   const fbtn = (k, label, val) => `<button class="fbtn ${val ? 'on' : ''}" data-f="${k}">${label}${val ? `: <b>${esc(val)}</b>` : ''}${icon('down')}</button>`;
   const nameOfFilter = {
-    user: R.user && (profileOf(R.user)?.full_name || ''), client: R.client && (R.client === '__none' ? 'zonder klant' : byId(S.clients, R.client)?.name || ''),
-    project: R.project && (byId(S.projects, R.project)?.name || ''), tag: R.tag && (R.tag === '__none' ? 'zonder tag' : byId(S.tags, R.tag)?.name || '')
+    user: R.user && (profileOf(R.user)?.full_name || ''), client: R.client && (R.client === '__none' ? 'without client' : byId(S.clients, R.client)?.name || ''),
+    project: R.project && (byId(S.projects, R.project)?.name || ''), tag: R.tag && (R.tag === '__none' ? 'without tag' : byId(S.tags, R.tag)?.name || '')
   };
 
   page.innerHTML = `
     <div class="page-head">
       <div class="seg" id="r-tab">${TABS.map(([k, l]) => `<button data-t="${k}" class="${R.tab === k ? 'on' : ''}">${l}</button>`).join('')}</div>
-      <div class="row">${rangeHtml(from, to)}<button class="btn" id="r-exp">${icon('dl')}Exporteren${icon('down')}</button></div>
+      <div class="row">${rangeHtml(from, to)}<button class="btn" id="r-exp">${icon('dl')}Export${icon('down')}</button></div>
     </div>
     <div class="card filterbar">
       <span class="flabel">Filter</span>
       ${isAdmin() ? fbtn('user', 'Team', nameOfFilter.user) : ''}
-      ${fbtn('client', 'Klant', nameOfFilter.client)}
+      ${fbtn('client', 'Client', nameOfFilter.client)}
       ${fbtn('project', 'Project', nameOfFilter.project)}
       ${S.tagsReady ? fbtn('tag', 'Tag', nameOfFilter.tag) : ''}
-      <input id="r-desc" placeholder="Omschrijving bevat…" value="${esc(R.desc)}" aria-label="Omschrijving">
-      ${R.user || R.client || R.project || R.tag || R.desc ? '<button class="linkbtn" id="r-clear">Filters wissen</button>' : ''}
+      <input id="r-desc" placeholder="Description" value="${esc(R.desc)}" aria-label="Description">
+      ${R.user || R.client || R.project || R.tag || R.desc ? '<button class="linkbtn" id="r-clear">Clear filters</button>' : ''}
     </div>
     <div class="card">
       <div class="sumband">
-        <span>Totaal: <b class="num">${fmtHMS(total)}</b></span>
-        <span class="muted small">${entries.length} registraties</span>
+        <span>Total: <b class="num">${fmtHMS(total)}</b></span>
+        <span class="muted small">${entries.length} time entries</span>
       </div>
       <div class="card-body"><div class="chart" id="r-chart"></div></div>
     </div>
@@ -1196,30 +1197,30 @@ async function renderReports(page) {
     const sub = r => R.g2 ? groupRows(entries.filter(e => groupKeys(e, R.g1).includes(r.k)), R.g2, secOf) : [];
     const name = (r, g) => g === 'project' ? projLabel(byId(S.projects, r.k)) : g === 'user' && profileOf(r.k) ? `<span class="row" style="flex-wrap:nowrap">${avatar(profileOf(r.k))}${esc(profileOf(r.k).full_name)}</span>` : esc(groupText(r, g));
     body.innerHTML = `
-      <div class="card-head"><div class="row small"><span class="muted">Groeperen op</span>
-        <select id="r-g1" aria-label="Groeperen op">${groups.map(([k, l]) => `<option value="${k}" ${R.g1 === k ? 'selected' : ''}>${l}</option>`).join('')}</select>
-        <select id="r-g2" aria-label="Daarna op"><option value="">(geen)</option>${groups.filter(g => g[0] !== R.g1).map(([k, l]) => `<option value="${k}" ${R.g2 === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div></div>
-      ${rows.length ? `<div class="sum-split"><div class="table-wrap"><table class="tree"><thead><tr><th>Titel</th><th class="r">Duur</th><th class="r" style="width:70px">%</th></tr></thead><tbody>
+      <div class="card-head"><div class="row small"><span class="muted">Group by</span>
+        <select id="r-g1" aria-label="Group by">${groups.map(([k, l]) => `<option value="${k}" ${R.g1 === k ? 'selected' : ''}>${l}</option>`).join('')}</select>
+        <select id="r-g2" aria-label="Then by"><option value="">(none)</option>${groups.filter(g => g[0] !== R.g1).map(([k, l]) => `<option value="${k}" ${R.g2 === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div></div>
+      ${rows.length ? `<div class="sum-split"><div class="table-wrap"><table class="tree"><thead><tr><th>Title</th><th class="r">Duration</th><th class="r" style="width:70px">%</th></tr></thead><tbody>
         ${rows.map(r => {
           const kids = sub(r), open = R.open.has(r.k);
           return `<tr class="g1"><td>${kids.length ? `<button class="cnt ${open ? 'on' : ''}" data-open="${esc(r.k)}">${kids.length}</button>` : ''}${name(r, R.g1)}</td><td class="r num"><b>${fmtHMS(r.sec)}</b></td><td class="r num muted">${total ? Math.round(r.sec / total * 100) : 0}%</td></tr>`
             + (open ? kids.map(c => `<tr class="g2"><td>${name(c, R.g2)}</td><td class="r num">${fmtHMS(c.sec)}</td><td></td></tr>`).join('') : '');
         }).join('')}</tbody></table>
-        ${R.g1 === 'tag' || R.g2 === 'tag' ? '<div class="muted small" style="padding:10px 16px">Registraties met meerdere tags tellen bij elke tag mee.</div>' : ''}</div>
+        ${R.g1 === 'tag' || R.g2 === 'tag' ? '<div class="muted small" style="padding:10px 16px">Time entries with multiple tags count towards each tag.</div>' : ''}</div>
         <div class="donut-wrap">${donut(rows.map(r => ({ name: groupText(r, R.g1), sec: r.sec, color: r.color })), total)}</div></div>`
-      : '<div class="empty">Geen registraties voor deze filters.</div>'}`;
+      : '<div class="empty">No time entries for these filters.</div>'}`;
     $('#r-g1').onchange = e => set({ g1: e.target.value, g2: R.g2 === e.target.value ? '' : R.g2, open: new Set() });
     $('#r-g2').onchange = e => set({ g2: e.target.value });
     $$('[data-open]', body).forEach(b => b.onclick = () => { const k = b.dataset.open; R.open.has(k) ? R.open.delete(k) : R.open.add(k); refreshPage(); });
   } else if (R.tab === 'detailed') {
     const sorted = [...entries].sort((a, b) => entryStart(b) - entryStart(a));
-    body.innerHTML = sorted.length ? `<div class="table-wrap"><table><thead><tr><th>Registratie</th>${isAdmin() ? '<th>Medewerker</th>' : ''}<th>Datum</th><th>Tijd</th><th class="r">Duur</th><th></th></tr></thead><tbody>
-      ${sorted.map(e => `<tr data-id="${e.id}"><td>${e.description ? esc(e.description) : '<span class="muted">(geen omschrijving)</span>'}${tagChips(e.tag_ids)}<div class="small">${projLabel(projectOf(e))}</div></td>
+    body.innerHTML = sorted.length ? `<div class="table-wrap"><table><thead><tr><th>Time entry</th>${isAdmin() ? '<th>User</th>' : ''}<th>Date</th><th>Time</th><th class="r">Duration</th><th></th></tr></thead><tbody>
+      ${sorted.map(e => `<tr data-id="${e.id}"><td>${e.description ? esc(e.description) : '<span class="muted">(no description)</span>'}${tagChips(e.tag_ids)}<div class="small">${projLabel(projectOf(e))}</div></td>
         ${isAdmin() ? `<td>${esc(entryUserName(e))}</td>` : ''}
         <td class="num">${esc(fmtDate(entryStart(e), { day: '2-digit', month: '2-digit', year: 'numeric' }))}</td>
-        <td class="num muted">${hm(entryStart(e))} – ${e.end_at ? hm(entryEnd(e)) : 'nu'}</td><td class="r num"><b>${fmtHMS(entrySec(e))}</b></td>
-        <td class="r"><button class="btn icon ghost" data-edit aria-label="Bewerken">${icon('edit')}</button></td></tr>`).join('')}
-      </tbody></table></div>` : '<div class="empty">Geen registraties voor deze filters.</div>';
+        <td class="num muted">${hm(entryStart(e))} – ${e.end_at ? hm(entryEnd(e)) : 'now'}</td><td class="r num"><b>${fmtHMS(entrySec(e))}</b></td>
+        <td class="r"><button class="btn icon ghost" data-edit aria-label="Edit">${icon('edit')}</button></td></tr>`).join('')}
+      </tbody></table></div>` : '<div class="empty">No time entries for these filters.</div>';
     $$('[data-edit]', body).forEach(b => b.onclick = () => openEntryModal(entries.find(x => x.id === b.closest('tr').dataset.id)));
   } else {
     // Wekelijks: rijen per groep, kolommen per dag/week/maand (zelfde indeling als de grafiek)
@@ -1227,11 +1228,11 @@ async function renderReports(page) {
     const rows = groupRows(entries, R.g1, secOf);
     const cell = (r, c) => entries.filter(e => groupKeys(e, R.g1).includes(r.k)).reduce((t, e) => t + clipSec(e, c.a, c.b), 0);
     body.innerHTML = `
-      <div class="card-head"><div class="row small"><span class="muted">Rijen per</span><select id="r-g1" aria-label="Rijen per">${groups.filter(g => g[0] !== 'day').map(([k, l]) => `<option value="${k}" ${R.g1 === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div></div>
-      ${rows.length ? `<div class="table-wrap"><table class="weekly"><thead><tr><th>${GROUPS.find(g => g[0] === R.g1)[1]}</th>${cols.map(c => `<th class="r">${esc(c.label)}</th>`).join('')}<th class="r">Totaal</th></tr></thead><tbody>
+      <div class="card-head"><div class="row small"><span class="muted">Rows by</span><select id="r-g1" aria-label="Rows by">${groups.filter(g => g[0] !== 'day').map(([k, l]) => `<option value="${k}" ${R.g1 === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div></div>
+      ${rows.length ? `<div class="table-wrap"><table class="weekly"><thead><tr><th>${GROUPS.find(g => g[0] === R.g1)[1]}</th>${cols.map(c => `<th class="r">${esc(c.label)}</th>`).join('')}<th class="r">Total</th></tr></thead><tbody>
         ${rows.map(r => `<tr><td>${R.g1 === 'project' ? projLabel(byId(S.projects, r.k)) : esc(groupText(r, R.g1))}</td>${cols.map(c => { const v = cell(r, c); return `<td class="r num ${v ? '' : 'muted'}">${v ? fmtHM(v) : '–'}</td>`; }).join('')}<td class="r num"><b>${fmtHM(r.sec)}</b></td></tr>`).join('')}
-      </tbody><tfoot><tr><th>Totaal</th>${cols.map(c => `<th class="r num">${fmtHM(entries.reduce((t, e) => t + clipSec(e, c.a, c.b), 0))}</th>`).join('')}<th class="r num">${fmtHM(total)}</th></tr></tfoot></table></div>`
-      : '<div class="empty">Geen registraties voor deze filters.</div>'}`;
+      </tbody><tfoot><tr><th>Total</th>${cols.map(c => `<th class="r num">${fmtHM(entries.reduce((t, e) => t + clipSec(e, c.a, c.b), 0))}</th>`).join('')}<th class="r num">${fmtHM(total)}</th></tr></tfoot></table></div>`
+      : '<div class="empty">No time entries for these filters.</div>'}`;
     $('#r-g1').onchange = e => set({ g1: e.target.value === 'day' ? 'project' : e.target.value });
   }
 
@@ -1243,13 +1244,13 @@ async function renderReports(page) {
   if ($('#r-clear')) $('#r-clear').onclick = () => set({ user: '', client: '', project: '', tag: '', desc: '' });
   $$('[data-f]', page).forEach(b => b.onclick = () => {
     const f = b.dataset.f, pick = v => set({ [f]: v || '' });
-    if (f === 'project') return pickProject(b, R.project, pick, { emptyLabel: 'Alle projecten', includeArchived: true });
+    if (f === 'project') return pickProject(b, R.project, pick, { emptyLabel: 'All projects', includeArchived: true });
     const items = f === 'user' ? S.profiles.map(p => ({ id: p.id, label: p.full_name || p.email }))
-      : f === 'client' ? [{ id: '__none', label: 'Zonder klant' }, ...S.clients.map(c => ({ id: c.id, label: c.name }))]
-      : [{ id: '__none', label: 'Zonder tag' }, ...S.tags.map(t => ({ id: t.id, label: t.name }))];
-    pickFrom(b, items, R[f], pick, { emptyLabel: f === 'user' ? 'Iedereen' : f === 'client' ? 'Alle klanten' : 'Alle tags' });
+      : f === 'client' ? [{ id: '__none', label: 'Without client' }, ...S.clients.map(c => ({ id: c.id, label: c.name }))]
+      : [{ id: '__none', label: 'Without tag' }, ...S.tags.map(t => ({ id: t.id, label: t.name }))];
+    pickFrom(b, items, R[f], pick, { emptyLabel: f === 'user' ? 'Everyone' : f === 'client' ? 'All clients' : 'All tags' });
   });
-  $('#r-exp').onclick = () => openMenu($('#r-exp'), `<button class="mi" data-x="pdf">${icon('pdf')}Opslaan als PDF</button><button class="mi" data-x="csv">${icon('dl')}Opslaan als CSV (Excel)</button>`, m => {
+  $('#r-exp').onclick = () => openMenu($('#r-exp'), `<button class="mi" data-x="pdf">${icon('pdf')}Save as PDF</button><button class="mi" data-x="csv">${icon('dl')}Save as CSV (Excel)</button>`, m => {
     $$('[data-x]', m).forEach(x => x.onclick = async () => {
       closeMenu();
       if (x.dataset.x === 'csv') return exportCsv(entries, from, to);
@@ -1278,18 +1279,18 @@ function groupRows(entries, group, secOf) {
 }
 // Naam van een groep als platte tekst (voor PDF)
 function groupText(r, group) {
-  if (group === 'project') { const p = byId(S.projects, r.k); return p ? p.name : 'Geen project'; }
-  if (group === 'user') return profileOf(r.k)?.full_name || entryUserName(r.sample) || 'Onbekend';
-  if (group === 'client') return byId(S.clients, r.k)?.name || 'Zonder klant';
-  if (group === 'tag') return r.k ? byId(S.tags, r.k)?.name || 'Onbekende tag' : 'Zonder tag';
+  if (group === 'project') { const p = byId(S.projects, r.k); return p ? p.name : 'No project'; }
+  if (group === 'user') return profileOf(r.k)?.full_name || entryUserName(r.sample) || 'Unknown';
+  if (group === 'client') return byId(S.clients, r.k)?.name || 'Without client';
+  if (group === 'tag') return r.k ? byId(S.tags, r.k)?.name || 'Unknown tag' : 'Without tag';
   if (group === 'day') return fmtDate(parseYmd(r.k), { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
-  return r.sample.description || '(geen omschrijving)';
+  return r.sample.description || '(no description)';
 }
 
 const loadScript = src => new Promise((res, rej) => {
   if ([...document.scripts].some(x => x.src === src)) return res();
   const el = document.createElement('script');
-  el.src = src; el.onload = res; el.onerror = () => rej(new Error('PDF-module kon niet geladen worden. Controleer je internetverbinding.'));
+  el.src = src; el.onload = res; el.onerror = () => rej(new Error('Could not load the PDF module. Check your internet connection.'));
   document.head.appendChild(el);
 });
 
@@ -1302,24 +1303,24 @@ async function exportPdf(entries, from, to) {
   const total = entries.reduce((a, e) => a + secOf(e), 0);
   const groupLabel = GROUPS.find(x => x[0] === R.g1)[1];
   const filters = [
-    R.desc && `Omschrijving bevat: ${R.desc}`,
-    R.user && `Medewerker: ${profileOf(R.user)?.full_name || ''}`, R.client && `Klant: ${byId(S.clients, R.client)?.name || ''}`,
+    R.desc && `Description: ${R.desc}`,
+    R.user && `User: ${profileOf(R.user)?.full_name || ''}`, R.client && `Client: ${byId(S.clients, R.client)?.name || ''}`,
     R.project && `Project: ${byId(S.projects, R.project)?.name || ''}`,
-    R.tag && `Tag: ${R.tag === '__none' ? 'zonder tag' : byId(S.tags, R.tag)?.name || ''}`
+    R.tag && `Tag: ${R.tag === '__none' ? 'without tag' : byId(S.tags, R.tag)?.name || ''}`
   ].filter(Boolean);
-  const d = x => fmtDate(x, { day: 'numeric', month: 'long', year: 'numeric' });
-  const style = { fontSize: 9, cellPadding: 1.6 }, head = { fillColor: [42, 120, 214] };
+  const d = x => fmtDate(x, { month: 'short', day: 'numeric', year: 'numeric' });
+  const style = { fontSize: 9, cellPadding: 1.6 }, head = { fillColor: [3, 169, 244] };
 
-  doc.setFontSize(16); doc.text('Polyfy - rapport', 14, 16);
+  doc.setFontSize(16); doc.text('Polyfy - Time report', 14, 16);
   doc.setFontSize(10); doc.setTextColor(90);
   doc.text(`${d(from)} - ${d(addDays(to, -1))}${filters.length ? '   |   ' + filters.join('   |   ') : ''}`, 14, 23);
-  doc.text(`Totaal ${fmtHM(total)} u (${fmtDec(total)} uur)   |   ${entries.length} registraties   |   gemaakt op ${d(new Date())}`, 14, 29);
+  doc.text(`Total ${fmtHMS(total)} (${fmtDec(total)} h)   |   ${entries.length} time entries   |   created ${d(new Date())}`, 14, 29);
   doc.setTextColor(0);
 
   doc.autoTable({
-    startY: 35, head: [[`Per ${groupLabel.toLowerCase()}`, 'Uren', 'Aandeel']], styles: style, headStyles: head,
+    startY: 35, head: [[groupLabel, 'Duration', 'Share']], styles: style, headStyles: head,
     columnStyles: { 1: { halign: 'right', cellWidth: 25 }, 2: { halign: 'right', cellWidth: 22 } },
-    body: [...groupRows(entries, R.g1, secOf).map(r => [groupText(r, R.g1), fmtHM(r.sec), `${total ? Math.round(r.sec / total * 100) : 0}%`]), ['Totaal', fmtHM(total), '']],
+    body: [...groupRows(entries, R.g1, secOf).map(r => [groupText(r, R.g1), fmtHMS(r.sec), `${total ? Math.round(r.sec / total * 100) : 0}%`]), ['Total', fmtHMS(total), '']],
     didParseCell: c => {
       if (c.section === 'head' && c.column.index > 0) c.cell.styles.halign = 'right';
       if (c.section === 'body' && c.row.index === c.table.body.length - 1) c.cell.styles.fontStyle = 'bold';
@@ -1327,32 +1328,32 @@ async function exportPdf(entries, from, to) {
   });
   doc.autoTable({
     startY: doc.lastAutoTable.finalY + 8, styles: style, headStyles: head,
-    head: [['Datum', 'Tijd', 'Duur', 'Medewerker', 'Klant', 'Project', 'Omschrijving', 'Tags']],
-    columnStyles: { 0: { cellWidth: 22 }, 1: { cellWidth: 22 }, 2: { halign: 'right', cellWidth: 14 } },
+    head: [['Date', 'Time', 'Duration', 'User', 'Client', 'Project', 'Description', 'Tags']],
+    columnStyles: { 0: { cellWidth: 22 }, 1: { cellWidth: 22 }, 2: { halign: 'right', cellWidth: 18 } },
     didParseCell: c => { if (c.section === 'head' && c.column.index === 2) c.cell.styles.halign = 'right'; },
     body: [...entries].sort((a, b) => entryStart(a) - entryStart(b)).map(e => {
       const p = projectOf(e);
-      return [fmtDate(entryStart(e), { day: '2-digit', month: '2-digit', year: 'numeric' }), `${hm(entryStart(e))}-${e.end_at ? hm(entryEnd(e)) : 'nu'}`, fmtHM(entrySec(e)),
+      return [fmtDate(entryStart(e), { day: '2-digit', month: '2-digit', year: 'numeric' }), `${hm(entryStart(e))}-${e.end_at ? hm(entryEnd(e)) : 'now'}`, fmtHMS(entrySec(e)),
         entryUserName(e), clientOf(p)?.name || '', p?.name || '', e.description, tagNames(e.tag_ids).join(', ')];
     })
   });
   const pages = doc.getNumberOfPages();
-  for (let i = 1; i <= pages; i++) { doc.setPage(i); doc.setFontSize(8); doc.setTextColor(140); doc.text(`Pagina ${i} van ${pages}`, 283, 203, { align: 'right' }); }
-  doc.save(`polyfy-rapport-${ymd(from)}-tot-${ymd(addDays(to, -1))}.pdf`);
+  for (let i = 1; i <= pages; i++) { doc.setPage(i); doc.setFontSize(8); doc.setTextColor(140); doc.text(`Page ${i} of ${pages}`, 283, 203, { align: 'right' }); }
+  doc.save(`polyfy-report-${ymd(from)}-to-${ymd(addDays(to, -1))}.pdf`);
 }
 
 function exportCsv(entries, from, to) {
   const q = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
-  const head = ['Datum', 'Start', 'Einde', 'Duur (u:mm)', 'Duur (decimaal)', 'Medewerker', 'E-mail', 'Klant', 'Project', 'Omschrijving', 'Tags', 'Factureerbaar'];
+  const head = ['Date', 'Start time', 'End time', 'Duration (h:mm)', 'Duration (decimal)', 'User', 'Email', 'Client', 'Project', 'Description', 'Tags', 'Billable'];
   const rows = [...entries].sort((a, b) => entryStart(a) - entryStart(b)).map(e => {
     const p = projectOf(e), u = profileOf(e.user_id), sec = entrySec(e);
     return [ymd(entryStart(e)), hm(entryStart(e)), e.end_at ? hm(entryEnd(e)) : '', fmtHM(sec), (sec / 3600).toFixed(2).replace('.', ','),
-      u?.full_name || e.import_name, u?.email || e.import_email, clientOf(p)?.name, p?.name, e.description, tagNames(e.tag_ids).join(', '), e.billable ? 'Ja' : 'Nee'];
+      u?.full_name || e.import_name, u?.email || e.import_email, clientOf(p)?.name, p?.name, e.description, tagNames(e.tag_ids).join(', '), e.billable ? 'Yes' : 'No'];
   });
   const csv = '﻿' + [head, ...rows].map(r => r.map(q).join(';')).join('\r\n');
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
-  a.download = `polyfy-rapport-${ymd(from)}-tot-${ymd(addDays(to, -1))}.csv`;
+  a.download = `polyfy-report-${ymd(from)}-to-${ymd(addDays(to, -1))}.csv`;
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
@@ -1372,20 +1373,20 @@ async function renderProjects(page) {
     .filter(p => !P.search || (p.name + ' ' + (clientOf(p)?.name || '')).toLowerCase().includes(P.search.toLowerCase()));
 
   page.innerHTML = `
-    <div class="page-head"><div><h1>Projects</h1><div class="muted">${list.length} van ${S.projects.length} projecten</div></div>${isAdmin() ? `<button class="btn primary" id="p-new">${icon('plus')}Nieuw project</button>` : ''}</div>
+    <div class="page-head"><div><h1>Projects</h1><div class="muted">${list.length} of ${S.projects.length} projects</div></div>${isAdmin() ? `<button class="btn primary" id="p-new">Create new project</button>` : ''}</div>
     <div class="row">
-      <input id="p-search" placeholder="Zoek project of klant…" value="${esc(P.search)}" style="min-width:240px">
-      <select id="p-client" aria-label="Klant"><option value="">Alle klanten</option><option value="__none" ${P.client === '__none' ? 'selected' : ''}>Zonder klant</option>${S.clients.map(c => `<option value="${c.id}" ${c.id === P.client ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select>
-      <div class="seg" id="p-status">${[['active', 'Actief'], ['archived', 'Gearchiveerd'], ['all', 'Alle']].map(([k, l]) => `<button data-s="${k}" class="${P.status === k ? 'on' : ''}">${l}</button>`).join('')}</div>
+      <input id="p-search" placeholder="Search by name" value="${esc(P.search)}" style="min-width:240px">
+      <select id="p-client" aria-label="Client"><option value="">All clients</option><option value="__none" ${P.client === '__none' ? 'selected' : ''}>Without client</option>${S.clients.map(c => `<option value="${c.id}" ${c.id === P.client ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select>
+      <div class="seg" id="p-status">${[['active', 'Active'], ['archived', 'Archived'], ['all', 'All']].map(([k, l]) => `<button data-s="${k}" class="${P.status === k ? 'on' : ''}">${l}</button>`).join('')}</div>
     </div>
     <div class="card table-wrap">
-      ${list.length ? `<table><thead><tr><th>Project</th><th>Klant</th><th class="r">Geregistreerd</th>${isAdmin() ? '<th></th>' : ''}</tr></thead><tbody>
+      ${list.length ? `<table><thead><tr><th>Name</th><th>Client</th><th class="r">Tracked</th>${isAdmin() ? '<th></th>' : ''}</tr></thead><tbody>
       ${list.map(p => `<tr data-id="${p.id}">
-          <td><a href="#reports" data-rep class="proj" style="color:var(--text);text-decoration:none"><span class="dot" style="background:${esc(p.color)}"></span>${esc(p.name)}</a>${p.archived ? ' <span class="tag">gearchiveerd</span>' : ''}</td>
+          <td><a href="#reports" data-rep class="proj" style="color:var(--text);text-decoration:none"><span class="dot" style="background:${esc(p.color)}"></span>${esc(p.name)}</a>${p.archived ? ' <span class="tag">archived</span>' : ''}</td>
           <td>${esc(clientOf(p)?.name || '–')}</td>
           <td class="r num"><b>${fmtHM(Number(tot.get(p.id)?.total_seconds || 0))}</b></td>
-          ${isAdmin() ? `<td class="r"><button class="btn icon ghost" data-edit aria-label="Bewerken">${icon('edit')}</button></td>` : ''}
-        </tr>`).join('')}</tbody></table>` : `<div class="empty">${S.projects.length ? 'Geen projecten gevonden.' : isAdmin() ? 'Nog geen projecten. Maak je eerste project aan.' : 'Er zijn nog geen projecten. Vraag een beheerder om ze aan te maken.'}</div>`}
+          ${isAdmin() ? `<td class="r"><button class="btn icon ghost" data-edit aria-label="Edit">${icon('edit')}</button></td>` : ''}
+        </tr>`).join('')}</tbody></table>` : `<div class="empty">${S.projects.length ? 'No projects found.' : isAdmin() ? 'No projects yet. Create your first project.' : 'There are no projects yet. Ask an admin to create them.'}</div>`}
     </div>`;
 
   const search = $('#p-search');
@@ -1411,15 +1412,15 @@ async function renderClients(page) {
   if (S.view !== 'clients') return;
   const tot = new Map(totals.map(t => [t.project_id, Number(t.total_seconds)]));
   page.innerHTML = `
-    <div class="page-head"><h1>Clients</h1>${isAdmin() ? `<button class="btn primary" id="c-new">${icon('plus')}Nieuwe klant</button>` : ''}</div>
+    <div class="page-head"><h1>Clients</h1>${isAdmin() ? `<button class="btn primary" id="c-new">Create new client</button>` : ''}</div>
     <div class="card table-wrap">
-      ${S.clients.length ? `<table><thead><tr><th>Klant</th><th>Projecten</th><th class="r">Geregistreerd</th>${isAdmin() ? '<th></th>' : ''}</tr></thead><tbody>${S.clients.map(c => {
+      ${S.clients.length ? `<table><thead><tr><th>Name</th><th>Projects</th><th class="r">Tracked</th>${isAdmin() ? '<th></th>' : ''}</tr></thead><tbody>${S.clients.map(c => {
         const ps = S.projects.filter(p => p.client_id === c.id);
-        return `<tr data-cid="${c.id}"><td><b>${esc(c.name)}</b>${c.archived ? ' <span class="tag">gearchiveerd</span>' : ''}</td>
-          <td><a href="#projects" data-cproj>${ps.length} project${ps.length === 1 ? '' : 'en'}</a></td>
+        return `<tr data-cid="${c.id}"><td><b>${esc(c.name)}</b>${c.archived ? ' <span class="tag">archived</span>' : ''}</td>
+          <td><a href="#projects" data-cproj>${ps.length} project${ps.length === 1 ? '' : 's'}</a></td>
           <td class="r num">${fmtHM(ps.reduce((a, p) => a + (tot.get(p.id) || 0), 0))}</td>
-          ${isAdmin() ? `<td class="r"><button class="btn icon ghost" data-cedit aria-label="Bewerken">${icon('edit')}</button></td>` : ''}</tr>`;
-      }).join('')}</tbody></table>` : '<div class="empty">Nog geen klanten.</div>'}
+          ${isAdmin() ? `<td class="r"><button class="btn icon ghost" data-cedit aria-label="Edit">${icon('edit')}</button></td>` : ''}</tr>`;
+      }).join('')}</tbody></table>` : '<div class="empty">No clients yet.</div>'}
     </div>`;
   $$('[data-cproj]').forEach(a => a.onclick = () => Object.assign(S.proj, { client: a.closest('tr').dataset.cid, status: 'all', search: '' }));
   if (isAdmin()) {
@@ -1433,12 +1434,12 @@ async function renderClients(page) {
 // =====================================================================
 async function renderTags(page) {
   page.innerHTML = `
-    <div class="page-head"><h1>Tags</h1>${isAdmin() && S.tagsReady ? `<button class="btn primary" id="tg-new">${icon('plus')}Nieuwe tag</button>` : ''}</div>
-    ${!S.tagsReady ? '<div class="card card-body notice">Tags zijn nog niet actief: voer <code>supabase/schema-v2-tags-import.sql</code> uit in Supabase.</div>'
-      : `<div class="card table-wrap">${S.tags.length ? `<table><thead><tr><th>Tag</th><th>Status</th>${isAdmin() ? '<th></th>' : ''}</tr></thead><tbody>${S.tags.map(t => `<tr data-tid="${t.id}">
-          <td><span class="tag">${esc(t.name)}</span></td><td class="muted">${t.archived ? 'gearchiveerd' : 'actief'}</td>
-          ${isAdmin() ? `<td class="r"><button class="btn icon ghost" data-tedit aria-label="Bewerken">${icon('edit')}</button></td>` : ''}</tr>`).join('')}</tbody></table>`
-        : '<div class="empty">Nog geen tags. Je kan ze ook rechtstreeks in de Time Tracker maken.</div>'}</div>`}`;
+    <div class="page-head"><h1>Tags</h1>${isAdmin() && S.tagsReady ? `<button class="btn primary" id="tg-new">Create new tag</button>` : ''}</div>
+    ${!S.tagsReady ? '<div class="card card-body notice">Tags are not active yet: run <code>supabase/schema-v2-tags-import.sql</code> in Supabase.</div>'
+      : `<div class="card table-wrap">${S.tags.length ? `<table><thead><tr><th>Name</th><th>Status</th>${isAdmin() ? '<th></th>' : ''}</tr></thead><tbody>${S.tags.map(t => `<tr data-tid="${t.id}">
+          <td><span class="tag">${esc(t.name)}</span></td><td class="muted">${t.archived ? 'archived' : 'active'}</td>
+          ${isAdmin() ? `<td class="r"><button class="btn icon ghost" data-tedit aria-label="Edit">${icon('edit')}</button></td>` : ''}</tr>`).join('')}</tbody></table>`
+        : '<div class="empty">No tags yet. You can also create them right from the Time Tracker.</div>'}</div>`}`;
   if (isAdmin() && S.tagsReady) {
     $('#tg-new').onclick = () => openTagModal(null);
     $$('[data-tedit]').forEach(b => b.onclick = () => openTagModal(byId(S.tags, b.closest('tr').dataset.tid)));
@@ -1446,26 +1447,26 @@ async function renderTags(page) {
 }
 
 function openTagModal(t) {
-  openModal(t ? 'Tag bewerken' : 'Nieuwe tag', `
-    <label class="field">Naam<input id="tm-name" value="${esc(t?.name || '')}" required></label>
-    ${t ? `<label class="check"><input type="checkbox" id="tm-arch" ${t.archived ? 'checked' : ''}> Gearchiveerd (niet meer kiesbaar bij registreren)</label>` : ''}`,
-    `<div>${t ? `<button class="btn danger" id="tm-del">${icon('trash')}Verwijderen</button>` : ''}</div><div class="row"><button class="btn" data-close>Annuleren</button><button class="btn primary" id="tm-save">Opslaan</button></div>`);
+  openModal(t ? 'Edit tag' : 'Create new tag', `
+    <label class="field">Name<input id="tm-name" value="${esc(t?.name || '')}" required></label>
+    ${t ? `<label class="check"><input type="checkbox" id="tm-arch" ${t.archived ? 'checked' : ''}> Archived (no longer selectable)</label>` : ''}`,
+    `<div>${t ? `<button class="btn danger" id="tm-del">${icon('trash')}Delete</button>` : ''}</div><div class="row"><button class="btn" data-close>Cancel</button><button class="btn primary" id="tm-save">Save</button></div>`);
   $('#tm-save').onclick = async () => {
     const name = $('#tm-name').value.trim();
-    if (!name) return toast('Geef de tag een naam.', true);
+    if (!name) return toast('Enter a tag name.', true);
     const row = { name }; if (t) row.archived = $('#tm-arch').checked;
     const { data, error } = t ? await sb.from('tags').update(row).eq('id', t.id).select().single() : await sb.from('tags').insert(row).select().single();
-    if (error) return fail(error.code === '23505' ? new Error('Er bestaat al een tag met die naam.') : error);
+    if (error) return fail(error.code === '23505' ? new Error('A tag with that name already exists.') : error);
     if (t) Object.assign(t, data); else S.tags.push(data);
     S.tags.sort(byName);
-    closeModal(); toast('Tag opgeslagen'); renderTimer(); refreshPage();
+    closeModal(); toast('Tag saved'); renderTimer(); refreshPage();
   };
   if (t) $('#tm-del').onclick = async () => {
-    if (!confirm(`Tag "${t.name}" verwijderen? Hij verdwijnt ook uit alle registraties. Archiveren is meestal beter.`)) return;
+    if (!confirm(`Delete tag "${t.name}"? It will also be removed from all time entries. Archiving is usually better.`)) return;
     const { error } = await sb.from('tags').delete().eq('id', t.id);
     if (error) return fail(error);
     S.tags = S.tags.filter(x => x.id !== t.id);
-    closeModal(); toast('Tag verwijderd'); renderTimer(); refreshPage();
+    closeModal(); toast('Tag deleted'); renderTimer(); refreshPage();
   };
 }
 
@@ -1473,16 +1474,16 @@ function openProjectModal(p) {
   const used = new Set(S.projects.map(x => x.color));
   const cur = p || { name: '', client_id: null, color: PROJECT_COLORS.find(c => !used.has(c)) || PROJECT_COLORS[S.projects.length % PROJECT_COLORS.length], billable: true, hourly_rate: null, budget_hours: null, archived: false };
   let color = cur.color;
-  const m = openModal(p ? 'Project bewerken' : 'Nieuw project', `
-    <label class="field">Naam<input id="pm-name" value="${esc(cur.name)}" required></label>
-    <label class="field">Klant<select id="pm-client"><option value="">Zonder klant</option>${S.clients.filter(c => !c.archived || c.id === cur.client_id).map(c => `<option value="${c.id}" ${c.id === cur.client_id ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}<option value="__new">+ Nieuwe klant…</option></select></label>
-    <div class="field">Kleur<div class="swatches">${PROJECT_COLORS.map(c => `<button type="button" class="swatch ${c === color ? 'on' : ''}" data-c="${c}" style="background:${c}" aria-label="Kleur ${c}"></button>`).join('')}</div></div>
-    ${p ? `<label class="check"><input type="checkbox" id="pm-arch" ${cur.archived ? 'checked' : ''}> Gearchiveerd (niet meer kiesbaar bij registreren)</label>` : ''}`,
-    `<div>${p ? `<button class="btn danger" id="pm-del">${icon('trash')}Verwijderen</button>` : ''}</div><div class="row"><button class="btn" data-close>Annuleren</button><button class="btn primary" id="pm-save">Opslaan</button></div>`);
+  const m = openModal(p ? 'Edit project' : 'Create new project', `
+    <label class="field">Name<input id="pm-name" value="${esc(cur.name)}" required></label>
+    <label class="field">Client<select id="pm-client"><option value="">Without client</option>${S.clients.filter(c => !c.archived || c.id === cur.client_id).map(c => `<option value="${c.id}" ${c.id === cur.client_id ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}<option value="__new">+ Create new client…</option></select></label>
+    <div class="field">Color<div class="swatches">${PROJECT_COLORS.map(c => `<button type="button" class="swatch ${c === color ? 'on' : ''}" data-c="${c}" style="background:${c}" aria-label="Color ${c}"></button>`).join('')}</div></div>
+    ${p ? `<label class="check"><input type="checkbox" id="pm-arch" ${cur.archived ? 'checked' : ''}> Archived (no longer selectable)</label>` : ''}`,
+    `<div>${p ? `<button class="btn danger" id="pm-del">${icon('trash')}Delete</button>` : ''}</div><div class="row"><button class="btn" data-close>Cancel</button><button class="btn primary" id="pm-save">Save</button></div>`);
   $$('.swatch', m).forEach(s => s.onclick = () => { color = s.dataset.c; $$('.swatch', m).forEach(x => x.classList.toggle('on', x === s)); });
   $('#pm-client').onchange = async e => {
     if (e.target.value !== '__new') return;
-    const name = prompt('Naam van de nieuwe klant');
+    const name = prompt('Name of the new client');
     if (!name?.trim()) { e.target.value = cur.client_id || ''; return; }
     const { data, error } = await sb.from('clients').insert({ name: name.trim() }).select().single();
     if (error) { e.target.value = ''; return fail(error); }
@@ -1492,46 +1493,46 @@ function openProjectModal(p) {
   };
   $('#pm-save').onclick = async () => {
     const name = $('#pm-name').value.trim();
-    if (!name) return toast('Geef het project een naam.', true);
+    if (!name) return toast('Enter a project name.', true);
     const row = { name, client_id: $('#pm-client').value || null, color };
     if (p) row.archived = $('#pm-arch').checked;
     const { data, error } = p ? await sb.from('projects').update(row).eq('id', p.id).select().single() : await sb.from('projects').insert(row).select().single();
     if (error) return fail(error);
     if (p) Object.assign(p, data); else S.projects.push(data);
     S.projects.sort((a, b) => a.name.localeCompare(b.name));
-    closeModal(); toast('Project opgeslagen'); renderTimer(); refreshPage();
+    closeModal(); toast('Project saved'); renderTimer(); refreshPage();
   };
   if (p) $('#pm-del').onclick = async () => {
-    if (!confirm(`Project "${p.name}" verwijderen? Bestaande registraties blijven bewaard zonder project. Archiveren is meestal beter.`)) return;
+    if (!confirm(`Delete project "${p.name}"? Existing time entries are kept without a project. Archiving is usually better.`)) return;
     const { error } = await sb.from('projects').delete().eq('id', p.id);
     if (error) return fail(error);
     S.projects = S.projects.filter(x => x.id !== p.id);
-    closeModal(); toast('Project verwijderd'); renderTimer(); refreshPage();
+    closeModal(); toast('Project deleted'); renderTimer(); refreshPage();
   };
 }
 
 function openClientModal(c) {
-  openModal(c ? 'Klant bewerken' : 'Nieuwe klant', `
-    <label class="field">Naam<input id="cm-name" value="${esc(c?.name || '')}" required></label>
-    ${c ? `<label class="check"><input type="checkbox" id="cm-arch" ${c.archived ? 'checked' : ''}> Gearchiveerd</label>` : ''}`,
-    `<div>${c ? `<button class="btn danger" id="cm-del">${icon('trash')}Verwijderen</button>` : ''}</div><div class="row"><button class="btn" data-close>Annuleren</button><button class="btn primary" id="cm-save">Opslaan</button></div>`);
+  openModal(c ? 'Edit client' : 'Create new client', `
+    <label class="field">Name<input id="cm-name" value="${esc(c?.name || '')}" required></label>
+    ${c ? `<label class="check"><input type="checkbox" id="cm-arch" ${c.archived ? 'checked' : ''}> Archived</label>` : ''}`,
+    `<div>${c ? `<button class="btn danger" id="cm-del">${icon('trash')}Delete</button>` : ''}</div><div class="row"><button class="btn" data-close>Cancel</button><button class="btn primary" id="cm-save">Save</button></div>`);
   $('#cm-save').onclick = async () => {
     const name = $('#cm-name').value.trim();
-    if (!name) return toast('Geef de klant een naam.', true);
+    if (!name) return toast('Enter a client name.', true);
     const row = { name }; if (c) row.archived = $('#cm-arch').checked;
     const { data, error } = c ? await sb.from('clients').update(row).eq('id', c.id).select().single() : await sb.from('clients').insert(row).select().single();
     if (error) return fail(error);
     if (c) Object.assign(c, data); else S.clients.push(data);
     S.clients.sort((a, b) => a.name.localeCompare(b.name));
-    closeModal(); toast('Klant opgeslagen'); renderTimer(); refreshPage();
+    closeModal(); toast('Client saved'); renderTimer(); refreshPage();
   };
   if (c) $('#cm-del').onclick = async () => {
-    if (!confirm(`Klant "${c.name}" verwijderen? De projecten blijven bestaan, zonder klant.`)) return;
+    if (!confirm(`Delete client "${c.name}"? Its projects are kept, without a client.`)) return;
     const { error } = await sb.from('clients').delete().eq('id', c.id);
     if (error) return fail(error);
     S.clients = S.clients.filter(x => x.id !== c.id);
     S.projects.forEach(p => { if (p.client_id === c.id) p.client_id = null; });
-    closeModal(); toast('Klant verwijderd'); renderTimer(); refreshPage();
+    closeModal(); toast('Client deleted'); renderTimer(); refreshPage();
   };
 }
 
@@ -1566,32 +1567,32 @@ async function renderTeam(page) {
   const pending = [...waiting.values()].filter(w => !S.profiles.some(p => lc(p.email) === w.email))
     .filter(w => T.status !== 'inactive' && (!T.role || w.role === T.role) && match(w.name || '', w.email))
     .sort((a, b) => (a.name || a.email).localeCompare(b.name || b.email));
-  const roleTag = role => `<span class="tag ${role === 'admin' ? 'admin' : ''}">${role === 'admin' ? 'Beheerder' : 'Medewerker'}</span>`;
+  const roleTag = role => `<span class="tag ${role === 'admin' ? 'admin' : ''}">${role === 'admin' ? 'Admin' : 'Member'}</span>`;
 
   page.innerHTML = `
-    <div class="page-head"><h1>Team</h1>${isAdmin() ? `<button class="btn primary" id="tm-add">Nieuw lid toevoegen</button>` : ''}</div>
+    <div class="page-head"><h1>Team</h1>${isAdmin() ? `<button class="btn primary" id="tm-add">Add new member</button>` : ''}</div>
     <div class="card filterbar">
       <span class="flabel">Filter</span>
-      <select id="tm-status" aria-label="Status"><option value="active">Actief</option><option value="inactive" ${T.status === 'inactive' ? 'selected' : ''}>Gedeactiveerd</option><option value="all" ${T.status === 'all' ? 'selected' : ''}>Alle</option></select>
-      <select id="tm-role" aria-label="Rol"><option value="">Alle rollen</option><option value="admin" ${T.role === 'admin' ? 'selected' : ''}>Beheerder</option><option value="member" ${T.role === 'member' ? 'selected' : ''}>Medewerker</option></select>
-      <input id="tm-q" placeholder="Zoek op naam of e-mail" value="${esc(T.q)}" style="margin-left:auto;min-width:220px" aria-label="Zoeken">
+      <select id="tm-status" aria-label="Status"><option value="active">Active</option><option value="inactive" ${T.status === 'inactive' ? 'selected' : ''}>Inactive</option><option value="all" ${T.status === 'all' ? 'selected' : ''}>All</option></select>
+      <select id="tm-role" aria-label="Role"><option value="">All roles</option><option value="admin" ${T.role === 'admin' ? 'selected' : ''}>Admin</option><option value="member" ${T.role === 'member' ? 'selected' : ''}>Member</option></select>
+      <input id="tm-q" placeholder="Search by name or email" value="${esc(T.q)}" style="margin-left:auto;min-width:220px" aria-label="Search">
     </div>
     <div class="card table-wrap">
-      <div class="card-head"><span class="muted small">Leden</span><span class="muted small">${members.length + pending.length}</span></div>
-      ${members.length || pending.length ? `<table><thead><tr><th>Naam</th><th>E-mail</th><th>Rol</th>${isAdmin() ? '<th></th>' : ''}</tr></thead><tbody>
+      <div class="card-head"><span class="muted small">Members</span><span class="muted small">${members.length + pending.length}</span></div>
+      ${members.length || pending.length ? `<table><thead><tr><th>Name</th><th>Email</th><th>Role</th>${isAdmin() ? '<th></th>' : ''}</tr></thead><tbody>
       ${members.map(p => {
         const l = live.get(p.id), pj = l && byId(S.projects, l.running_project);
         return `<tr data-id="${p.id}">
-          <td><span class="row" style="flex-wrap:nowrap">${avatar(p)}<span>${esc(p.full_name || p.email)}${p.id === S.me.id ? ' <span class="muted">(jij)</span>' : ''}
-            ${l ? `<br><span class="tag live" title="Sinds ${hm(new Date(l.running_since))}">● aan het werk${pj ? ' · ' + esc(pj.name) : ''}</span>` : ''}${p.active ? '' : ' <span class="tag off">gedeactiveerd</span>'}</span></span></td>
+          <td><span class="row" style="flex-wrap:nowrap">${avatar(p)}<span>${esc(p.full_name || p.email)}${p.id === S.me.id ? ' <span class="muted">(you)</span>' : ''}
+            ${l ? `<br><span class="tag live" title="Since ${hm(new Date(l.running_since))}">● working${pj ? ' · ' + esc(pj.name) : ''}</span>` : ''}${p.active ? '' : ' <span class="tag off">inactive</span>'}</span></span></td>
           <td>${esc(p.email)}</td>
           <td>${isAdmin() && p.id !== S.me.id ? `<button class="rolebtn" data-role>${roleTag(p.role)}</button>` : roleTag(p.role)}</td>
-          ${isAdmin() ? `<td class="r"><button class="btn icon ghost" data-more aria-label="Meer">${icon('dots')}</button></td>` : ''}
+          ${isAdmin() ? `<td class="r"><button class="btn icon ghost" data-more aria-label="More">${icon('dots')}</button></td>` : ''}
         </tr>`;
       }).join('')}
-      ${pending.map(w => `<tr data-pend="${esc(w.email)}"><td><span class="row" style="flex-wrap:nowrap">${avatar({ id: w.email, full_name: w.name || w.email })}<span>${esc(w.name || w.email)}<br><span class="muted small">${w.invited ? 'Uitgenodigd, nog geen account' : 'Nog geen account'}${w.entries ? ` · ${w.entries} geïmporteerde registraties` : ''}</span></span></span></td>
-        <td>${esc(w.email)}</td><td>${roleTag(w.role)}</td>${isAdmin() ? `<td class="r">${w.invited ? `<button class="btn icon ghost" data-pmore aria-label="Meer">${icon('dots')}</button>` : ''}</td>` : ''}</tr>`).join('')}
-      </tbody></table>` : '<div class="empty">Geen leden gevonden.</div>'}
+      ${pending.map(w => `<tr data-pend="${esc(w.email)}"><td><span class="row" style="flex-wrap:nowrap">${avatar({ id: w.email, full_name: w.name || w.email })}<span>${esc(w.name || w.email)}<br><span class="muted small">${w.invited ? 'Invited, no account yet' : 'No account yet'}${w.entries ? ` · ${w.entries} imported time entries` : ''}</span></span></span></td>
+        <td>${esc(w.email)}</td><td>${roleTag(w.role)}</td>${isAdmin() ? `<td class="r">${w.invited ? `<button class="btn icon ghost" data-pmore aria-label="More">${icon('dots')}</button>` : ''}</td>` : ''}</tr>`).join('')}
+      </tbody></table>` : '<div class="empty">No members found.</div>'}
     </div>`;
 
   const set = patch => { Object.assign(T, patch); refreshPage(); };
@@ -1609,75 +1610,75 @@ async function renderTeam(page) {
   $$('tr[data-id]', page).forEach(tr => {
     const p = profileOf(tr.dataset.id);
     const ro = $('[data-role]', tr);
-    if (ro) ro.onclick = () => openMenu(ro, `<button class="mi ${p.role === 'admin' ? 'on' : ''}" data-v="admin">Beheerder</button><button class="mi ${p.role === 'member' ? 'on' : ''}" data-v="member">Medewerker</button>`, m => {
+    if (ro) ro.onclick = () => openMenu(ro, `<button class="mi ${p.role === 'admin' ? 'on' : ''}" data-v="admin">Admin</button><button class="mi ${p.role === 'member' ? 'on' : ''}" data-v="member">Member</button>`, m => {
       $$('[data-v]', m).forEach(x => x.onclick = () => { closeMenu(); if (x.dataset.v !== p.role) saveProfile(p, { role: x.dataset.v }); });
     });
     const mo = $('[data-more]', tr);
-    mo.onclick = () => openMenu(mo, `<button class="mi" data-m="edit">Bewerken</button><button class="mi" data-m="rep">Rapport bekijken</button>${p.id !== S.me.id ? `<button class="mi ${p.active ? 'danger' : ''}" data-m="act">${p.active ? 'Deactiveren' : 'Activeren'}</button>` : ''}`, m => {
+    mo.onclick = () => openMenu(mo, `<button class="mi" data-m="edit">Edit</button><button class="mi" data-m="rep">View report</button>${p.id !== S.me.id ? `<button class="mi ${p.active ? 'danger' : ''}" data-m="act">${p.active ? 'Deactivate' : 'Activate'}</button>` : ''}`, m => {
       $$('[data-m]', m).forEach(x => x.onclick = () => {
         closeMenu();
         if (x.dataset.m === 'edit') return openMemberModal(p);
         if (x.dataset.m === 'rep') { Object.assign(S.rep, { user: p.id, project: '', client: '', tag: '', desc: '', g1: 'project', tab: 'summary' }); location.hash = 'reports'; return; }
-        if (p.active && !confirm(`${p.full_name || p.email} deactiveren? Die persoon kan dan niet meer inloggen om uren te registreren.`)) return;
+        if (p.active && !confirm(`Deactivate ${p.full_name || p.email}? They will no longer be able to log in and track time.`)) return;
         saveProfile(p, { active: !p.active });
       });
     });
   });
-  $$('tr[data-pend] [data-pmore]', page).forEach(b => b.onclick = () => openMenu(b, '<button class="mi danger" data-m="del">Uitnodiging intrekken</button>', m => {
+  $$('tr[data-pend] [data-pmore]', page).forEach(b => b.onclick = () => openMenu(b, '<button class="mi danger" data-m="del">Revoke invite</button>', m => {
     $('[data-m]', m).onclick = async () => {
       closeMenu();
       const { error } = await sb.from('invites').delete().eq('email', b.closest('tr').dataset.pend);
       if (error) return fail(error);
-      toast('Uitnodiging ingetrokken'); refreshPage();
+      toast('Invite revoked'); refreshPage();
     };
   }));
 }
 
 function openInviteModal() {
   const link = location.origin + location.pathname, dom = (CFG.ALLOWED_EMAIL_DOMAIN || '').trim();
-  openModal('Nieuw lid toevoegen', `
+  openModal('Add new member', `
     ${S.invitesReady ? `
-      <label class="field">E-mailadres<input id="inv-email" type="email" placeholder="naam@${esc(dom || 'bedrijf.be')}" required></label>
+      <label class="field">Email<input id="inv-email" type="email" placeholder="name@${esc(dom || 'company.com')}" required></label>
       <div class="grid2">
-        <label class="field">Naam<input id="inv-name" placeholder="Voornaam Achternaam"></label>
-        <label class="field">Rol<select id="inv-role"><option value="member">Medewerker</option><option value="admin">Beheerder</option></select></label>
+        <label class="field">Name<input id="inv-name" placeholder="First and last name"></label>
+        <label class="field">Role<select id="inv-role"><option value="member">Member</option><option value="admin">Admin</option></select></label>
       </div>
-      <p class="muted small" style="margin:0">Wie zich met dit e-mailadres registreert, krijgt meteen deze naam en rol.</p>`
-      : '<p class="muted small" style="margin:0">Voer <code>supabase/schema-v4-uitnodigingen.sql</code> uit om collega\'s vooraf met een rol klaar te zetten.</p>'}
-    <div class="field">Link om te delen<div class="row"><input readonly value="${esc(link)}" style="flex:1;min-width:200px" id="inv-link"><button class="btn" id="inv-copy">Kopiëren</button></div></div>
-    <p class="muted small" style="margin:0">Je collega maakt zelf een account via deze link${dom ? `, met een <b>@${esc(dom)}</b>-adres` : ''}. Uren uit Clockify worden automatisch gekoppeld als het e-mailadres hetzelfde is als in Clockify.</p>`,
-    `<div></div><div class="row"><button class="btn" data-close>Sluiten</button>${S.invitesReady ? '<button class="btn primary" id="inv-save">Toevoegen</button>' : ''}</div>`);
-  $('#inv-copy').onclick = async () => { try { await navigator.clipboard.writeText(link); toast('Link gekopieerd'); } catch (_) { $('#inv-link').select(); } };
+      <p class="muted small" style="margin:0">Whoever signs up with this email address gets this name and role right away.</p>`
+      : '<p class="muted small" style="margin:0">Run <code>supabase/schema-v4-uitnodigingen.sql</code> to add teammates with a role in advance.</p>'}
+    <div class="field">Invite link<div class="row"><input readonly value="${esc(link)}" style="flex:1;min-width:200px" id="inv-link"><button class="btn" id="inv-copy">Copy</button></div></div>
+    <p class="muted small" style="margin:0">Your teammate signs up through this link${dom ? ` with a <b>@${esc(dom)}</b> address` : ''}. Time imported from Clockify is linked automatically when they use the same email address as in Clockify.</p>`,
+    `<div></div><div class="row"><button class="btn" data-close>Close</button>${S.invitesReady ? '<button class="btn primary" id="inv-save">Add</button>' : ''}</div>`);
+  $('#inv-copy').onclick = async () => { try { await navigator.clipboard.writeText(link); toast('Link copied'); } catch (_) { $('#inv-link').select(); } };
   if (!S.invitesReady) return;
   $('#inv-save').onclick = async () => {
     const email = lc($('#inv-email').value);
-    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return toast('Geef een geldig e-mailadres in.', true);
-    if (dom && !email.endsWith('@' + dom.toLowerCase())) return toast(`Enkel adressen van @${dom} kunnen een account maken.`, true);
-    if (S.profiles.some(p => lc(p.email) === email)) return toast('Er bestaat al een account met dit e-mailadres.', true);
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return toast('Enter a valid email address.', true);
+    if (dom && !email.endsWith('@' + dom.toLowerCase())) return toast(`Only @${dom} addresses can sign up.`, true);
+    if (S.profiles.some(p => lc(p.email) === email)) return toast('An account with this email address already exists.', true);
     const { error } = await sb.from('invites').upsert({ email, full_name: $('#inv-name').value.trim(), role: $('#inv-role').value });
     if (error) return fail(error);
-    closeModal(); toast('Toegevoegd. Deel de link zodat die collega een account kan maken.'); refreshPage();
+    closeModal(); toast('Added. Share the invite link so they can sign up.'); refreshPage();
   };
 }
 
 function openMemberModal(p) {
   const self = p.id === S.me.id;
-  openModal('Teamlid bewerken', `
+  openModal('Edit member', `
     <div class="row">${avatar(p)}<div><b>${esc(p.full_name || p.email)}</b><div class="muted small">${esc(p.email)}</div></div></div>
-    <label class="field">Naam<input id="mm-name" value="${esc(p.full_name)}"></label>
+    <label class="field">Name<input id="mm-name" value="${esc(p.full_name)}"></label>
     <div class="grid2">
-      <label class="field">Rol<select id="mm-role" ${self ? 'disabled' : ''}><option value="member" ${p.role === 'member' ? 'selected' : ''}>Medewerker</option><option value="admin" ${p.role === 'admin' ? 'selected' : ''}>Beheerder</option></select></label>
-      <label class="field">Weekdoel (uren)<input id="mm-target" type="number" min="0" max="168" step="0.5" value="${p.weekly_target}"></label>
+      <label class="field">Role<select id="mm-role" ${self ? 'disabled' : ''}><option value="member" ${p.role === 'member' ? 'selected' : ''}>Member</option><option value="admin" ${p.role === 'admin' ? 'selected' : ''}>Admin</option></select></label>
+      <label class="field">Weekly target (hours)<input id="mm-target" type="number" min="0" max="168" step="0.5" value="${p.weekly_target}"></label>
     </div>
-    ${self ? '<div class="muted small">Je kan je eigen rol niet wijzigen of je eigen account deactiveren.</div>' : `<label class="check"><input type="checkbox" id="mm-active" ${p.active ? 'checked' : ''}> Actief (uitgeschakeld = kan niet meer registreren)</label>`}`,
-    `<div></div><div class="row"><button class="btn" data-close>Annuleren</button><button class="btn primary" id="mm-save">Opslaan</button></div>`);
+    ${self ? '<div class="muted small">You cannot change your own role or deactivate your own account.</div>' : `<label class="check"><input type="checkbox" id="mm-active" ${p.active ? 'checked' : ''}> Active (inactive members cannot track time)</label>`}`,
+    `<div></div><div class="row"><button class="btn" data-close>Cancel</button><button class="btn primary" id="mm-save">Save</button></div>`);
   $('#mm-save').onclick = async () => {
     const row = { full_name: $('#mm-name').value.trim(), weekly_target: Number($('#mm-target').value || 0) };
     if (!self) { row.role = $('#mm-role').value; row.active = $('#mm-active').checked; }
     const { data, error } = await sb.from('profiles').update(row).eq('id', p.id).select().single();
     if (error) return fail(error);
     Object.assign(p, data);
-    closeModal(); toast('Teamlid opgeslagen'); refreshPage();
+    closeModal(); toast('Member saved'); refreshPage();
   };
 }
 
@@ -1735,9 +1736,9 @@ function analyzeImport(files) {
     const get = (r, k) => ix[k] >= 0 ? impVal(String(r[ix[k]] ?? '').trim()) : '';
     const num = v => v === '' ? null : Number(v.replace(',', '.')) || null;
     const isReport = ix.sdate >= 0 && ix.stime >= 0;
-    if (!isReport && ix.project < 0) { A.files.push({ name: file.name, kind: 'onbekend', n: 0 }); A.errors.push(`${file.name}: kolommen niet herkend (verwacht een Clockify-export).`); continue; }
+    if (!isReport && ix.project < 0) { A.files.push({ name: file.name, kind: 'unknown', n: 0 }); A.errors.push(`${file.name}: columns not recognized (expected a Clockify export).`); continue; }
     // Een samenvattend rapport heeft geen datums: daaruit komen enkel projecten en klanten
-    const kind = isReport ? 'registraties' : ix.tracked >= 0 ? 'projectlijst' : 'enkel projecten, geen registraties';
+    const kind = isReport ? 'time entries' : ix.tracked >= 0 ? 'project list' : 'projects only, no time entries';
     if (!isReport && ix.tracked < 0) A.summaryOnly = true;
     A.files.push({ name: file.name, kind, n: rows.length - 1 });
     rows.slice(1).forEach((r, i) => {
@@ -1778,9 +1779,9 @@ function analyzeImport(files) {
     let end = o.etime ? toDate(o.edate || o.sdate, o.etime) : null;
     if (!end && start && o.dur) end = new Date(start.getTime() + Number(o.dur.replace(',', '.')) * 3600000);
     if (start && end && end < start) end = addDays(end, 1);
-    if (!start || !end || isNaN(end)) { A.errors.push(`${o.file}, regel ${o.line}: datum of tijd niet leesbaar (${o.sdate} ${o.stime} – ${o.edate} ${o.etime})`); continue; }
+    if (!start || !end || isNaN(end)) { A.errors.push(`${o.file}, row ${o.line}: unreadable date or time (${o.sdate} ${o.stime} - ${o.edate} ${o.etime})`); continue; }
     const ukey = lc(o.email) || lc(o.user);
-    if (!ukey) { A.errors.push(`${o.file}, regel ${o.line}: geen medewerker`); continue; }
+    if (!ukey) { A.errors.push(`${o.file}, row ${o.line}: no user`); continue; }
     const ref = ['clockify', ukey, start.toISOString(), end.toISOString(), lc(o.project), lc(o.description)].join('|');
     if (refs.has(ref)) { A.dupes++; continue; }
     refs.add(ref);
@@ -1817,31 +1818,31 @@ async function renderImport(page) {
   S.pendingReady = !un.error;
   const A = S.imp;
   page.innerHTML = `
-    <div class="page-head"><div><h1>Import</h1><div class="muted">Registraties, projecten, klanten en tags overzetten naar Polyfy</div></div></div>
-    ${S.tagsReady ? '' : '<div class="card card-body notice">Voer eerst <code>supabase/schema-v2-tags-import.sql</code> uit in de Supabase SQL Editor en herlaad daarna deze pagina. Zonder die update kan er niet geïmporteerd worden.</div>'}
-    ${S.tagsReady && !S.pendingReady ? '<div class="card card-body notice">Voer ook <code>supabase/schema-v3-import-zonder-account.sql</code> uit om uren te kunnen importeren voor collega\'s die nog geen account hebben. Ze worden dan automatisch gekoppeld zodra ze er een maken.</div>' : ''}
+    <div class="page-head"><div><h1>Import</h1><div class="muted">Move time entries, projects, clients and tags from Clockify to Polyfy</div></div></div>
+    ${S.tagsReady ? '' : '<div class="card card-body notice">First run <code>supabase/schema-v2-tags-import.sql</code> in the Supabase SQL Editor and reload this page. Importing is not possible without that update.</div>'}
+    ${S.tagsReady && !S.pendingReady ? '<div class="card card-body notice">Also run <code>supabase/schema-v3-import-zonder-account.sql</code> to import time for teammates without an account. It is linked automatically once they sign up.</div>' : ''}
     ${un.data?.length ? `<div class="card table-wrap">
-      <div class="card-head"><h2>Wachten op een account</h2><span class="muted small">wordt automatisch gekoppeld bij registratie met dit e-mailadres</span></div>
-      <table><thead><tr><th>Uit Clockify</th><th class="r">Registraties</th><th class="r">Uren</th><th>Nu al koppelen aan</th></tr></thead><tbody>
+      <div class="card-head"><h2>Waiting for an account</h2><span class="muted small">linked automatically when someone signs up with this email address</span></div>
+      <table><thead><tr><th>From Clockify</th><th class="r">Time entries</th><th class="r">Hours</th><th>Link now to</th></tr></thead><tbody>
       ${un.data.map(r => `<tr><td><b>${esc(r.import_name || r.import_email)}</b><br><span class="muted small">${esc(r.import_email)}</span></td><td class="r num">${r.entries}</td><td class="r num">${fmtHM(Number(r.seconds))}</td>
-        <td><div class="row" style="flex-wrap:nowrap"><select data-claim="${esc(r.import_email)}" aria-label="Account"><option value="">Wachten op account</option>${S.profiles.map(p => `<option value="${p.id}">${esc(p.full_name || p.email)} (${esc(p.email)})</option>`).join('')}</select><button class="btn" data-claim-go>Koppelen</button></div></td></tr>`).join('')}
+        <td><div class="row" style="flex-wrap:nowrap"><select data-claim="${esc(r.import_email)}" aria-label="Account"><option value="">Wait for account</option>${S.profiles.map(p => `<option value="${p.id}">${esc(p.full_name || p.email)} (${esc(p.email)})</option>`).join('')}</select><button class="btn" data-claim-go>Link</button></div></td></tr>`).join('')}
       </tbody></table>
     </div>` : ''}
     <div class="card">
-      <div class="card-head"><h2>1. Exporteer uit Clockify</h2></div>
+      <div class="card-head"><h2>1. Export from Clockify</h2></div>
       <div class="card-body">
         <ol style="margin:0;padding-left:20px;display:flex;flex-direction:column;gap:6px">
-          <li><b>Registraties:</b> <i>Reports → Detailed</i>, kies de volledige periode (vanaf je allereerste registratie), dan <i>Export → Save as CSV</i>. Lukt één lange periode niet, exporteer dan per jaar en kies hieronder alle bestanden samen.</li>
-          <li><b>Alle projecten</b> (ook oude zonder registraties in de export): <i>Projects</i>, filter op <i>Active</i> én <i>Archived</i>, en exporteer de lijst als CSV. Optioneel.</li>
-          <li>${S.pendingReady ? 'Collega\'s hoeven nog geen account te hebben: hun uren worden gekoppeld zodra ze zich registreren met hetzelfde e-mailadres als in Clockify.' : 'Laat collega\'s eerst <b>zelf een account maken</b> in Polyfy: registraties worden via het e-mailadres aan hun account gekoppeld.'}</li>
+          <li><b>Time entries:</b> <i>Reports → Detailed</i>, choose the full period (from your very first entry), then <i>Export → Save as CSV</i>. If one long period does not work, export per year and select all files together below.</li>
+          <li><b>All projects</b> (including old ones without entries in the export): <i>Projects</i>, filter on <i>Active</i> and <i>Archived</i>, and export the list as CSV. Optional.</li>
+          <li>${S.pendingReady ? 'Teammates do not need an account yet: their time is linked once they sign up with the same email address as in Clockify.' : 'Ask teammates to <b>sign up</b> in Polyfy first: time entries are linked to their account by email address.'}</li>
         </ol>
       </div>
     </div>
     <div class="card">
-      <div class="card-head"><h2>2. Kies de CSV-bestanden</h2></div>
+      <div class="card-head"><h2>2. Choose the CSV files</h2></div>
       <div class="card-body row">
         <input type="file" id="i-file" accept=".csv,text/csv" multiple ${S.tagsReady ? '' : 'disabled'}>
-        ${A ? `<span class="muted small">${A.files.map(f => `${esc(f.name)} (${f.n} regels, ${f.kind})`).join(' · ')}</span>` : ''}
+        ${A ? `<span class="muted small">${A.files.map(f => `${esc(f.name)} (${f.n} rows, ${f.kind})`).join(' · ')}</span>` : ''}
       </div>
     </div>
     <div id="i-preview"></div>`;
@@ -1853,10 +1854,10 @@ async function renderImport(page) {
   };
   $$('[data-claim-go]', page).forEach(b => b.onclick = async () => {
     const sel = $('select', b.parentElement);
-    if (!sel.value) return toast('Kies eerst een account.', true);
+    if (!sel.value) return toast('Choose an account first.', true);
     const { data, error } = await sb.rpc('assign_imported', { p_email: sel.dataset.claim, p_user: sel.value });
     if (error) return fail(error);
-    toast(`${data} registraties gekoppeld`); refreshPage();
+    toast(`${data} time entries linked`); refreshPage();
   });
   if (A) renderImportPreview($('#i-preview'), A);
 }
@@ -1868,39 +1869,39 @@ function renderImportPreview(el, A) {
   const list = (title, items) => items.length ? `<details><summary><b>${items.length}</b> ${title}</summary><div class="row" style="gap:6px;margin-top:8px">${items.map(x => `<span class="tag">${esc(x)}</span>`).join('')}</div></details>` : '';
   el.innerHTML = `
     <div class="tiles">
-      <div class="card tile"><div class="label">Registraties</div><div class="value num">${A.entries.length}</div><div class="sub">${A.from ? `${esc(fmtDate(A.from, { day: 'numeric', month: 'short', year: 'numeric' }))} – ${esc(fmtDate(A.to, { day: 'numeric', month: 'short', year: 'numeric' }))}` : 'geen'}</div></div>
-      <div class="card tile"><div class="label">Uren</div><div class="value num">${fmtHM(A.entries.reduce((t, e) => t + (e.end - e.start) / 1000, 0))}</div><div class="sub">${users.length} medewerkers</div></div>
-      <div class="card tile"><div class="label">Projecten</div><div class="value num">${A.projects.size}</div><div class="sub">${plan.newProjects.length} nieuw</div></div>
-      <div class="card tile"><div class="label">Klanten · tags</div><div class="value num">${A.clients.size} · ${A.tags.size}</div><div class="sub">${plan.newClients.length} + ${plan.newTags.length} nieuw</div></div>
+      <div class="card tile"><div class="label">Time entries</div><div class="value num">${A.entries.length}</div><div class="sub">${A.from ? `${esc(fmtDate(A.from, { month: 'short', day: 'numeric', year: 'numeric' }))} - ${esc(fmtDate(A.to, { month: 'short', day: 'numeric', year: 'numeric' }))}` : 'none'}</div></div>
+      <div class="card tile"><div class="label">Hours</div><div class="value num">${fmtHM(A.entries.reduce((t, e) => t + (e.end - e.start) / 1000, 0))}</div><div class="sub">${users.length} users</div></div>
+      <div class="card tile"><div class="label">Projects</div><div class="value num">${A.projects.size}</div><div class="sub">${plan.newProjects.length} new</div></div>
+      <div class="card tile"><div class="label">Clients · tags</div><div class="value num">${A.clients.size} · ${A.tags.size}</div><div class="sub">${plan.newClients.length} + ${plan.newTags.length} new</div></div>
     </div>
     ${users.length ? `<div class="card table-wrap">
-      <div class="card-head"><h2>3. Koppel medewerkers</h2><span class="muted small">automatisch op e-mail of naam</span></div>
-      <table><thead><tr><th>In Clockify</th><th class="r">Registraties</th><th class="r">Uren</th><th>Account in Polyfy</th></tr></thead><tbody>
+      <div class="card-head"><h2>3. Match users</h2><span class="muted small">automatically by email or name</span></div>
+      <table><thead><tr><th>In Clockify</th><th class="r">Time entries</th><th class="r">Hours</th><th>Account in Polyfy</th></tr></thead><tbody>
       ${users.map(u => `<tr><td><b>${esc(u.name || u.email)}</b><br><span class="muted small">${esc(u.email)}</span></td><td class="r num">${u.n}</td><td class="r num">${fmtHM(u.sec)}</td>
-        <td><select data-ukey="${esc(u.key)}" aria-label="Account voor ${esc(u.name)}"><option value="">Niet importeren</option>${S.pendingReady && u.email ? `<option value="${PENDING}" ${A.map.get(u.key) === PENDING ? 'selected' : ''}>Koppelen zodra ${esc(u.email)} een account maakt</option>` : ''}${S.profiles.map(p => `<option value="${p.id}" ${A.map.get(u.key) === p.id ? 'selected' : ''}>${esc(p.full_name || p.email)} (${esc(p.email)})</option>`).join('')}</select></td></tr>`).join('')}
+        <td><select data-ukey="${esc(u.key)}" aria-label="Account for ${esc(u.name)}"><option value="">Do not import</option>${S.pendingReady && u.email ? `<option value="${PENDING}" ${A.map.get(u.key) === PENDING ? 'selected' : ''}>Link when ${esc(u.email)} signs up</option>` : ''}${S.profiles.map(p => `<option value="${p.id}" ${A.map.get(u.key) === p.id ? 'selected' : ''}>${esc(p.full_name || p.email)} (${esc(p.email)})</option>`).join('')}</select></td></tr>`).join('')}
       </tbody></table>
       <div class="card-body muted small" style="border-top:1px solid var(--line)">${S.pendingReady
-        ? 'Collega\'s zonder account: hun uren worden nu al geïmporteerd en automatisch aan hun account gekoppeld zodra ze zich registreren met hetzelfde e-mailadres. Tot dan zie enkel jij ze (in Reports).'
-        : 'Heeft iemand nog geen account? Laat die collega er eerst een maken en importeer hetzelfde bestand later opnieuw: wat al geïmporteerd is, wordt overgeslagen.'}</div>
+        ? 'Teammates without an account: their time is imported now and linked automatically once they sign up with the same email address. Until then only admins see it (in Reports).'
+        : 'Someone without an account yet? Ask them to sign up first and import the same file again later: what was already imported is skipped.'}</div>
     </div>` : ''}
     <div class="card">
-      <div class="card-head"><h2>${users.length ? '4' : '3'}. Importeren</h2></div>
+      <div class="card-head"><h2>${users.length ? '4' : '3'}. Import</h2></div>
       <div class="card-body" style="display:flex;flex-direction:column;gap:10px">
-        ${list('nieuwe klanten', plan.newClients)}
-        ${list('nieuwe projecten', plan.newProjects.map(p => p.name + (p.client ? ' · ' + p.client : '')))}
-        ${list('nieuwe tags', plan.newTags)}
+        ${list('new clients', plan.newClients)}
+        ${list('new projects', plan.newProjects.map(p => p.name + (p.client ? ' · ' + p.client : '')))}
+        ${list('new tags', plan.newTags)}
         ${A.trackedSec ? (() => {
           const sec = A.entries.reduce((t, e) => t + (e.end - e.start) / 1000, 0), pct = sec / A.trackedSec * 100;
-          return `<div class="card-body ${pct < 98 ? 'notice' : ''}" style="border-radius:var(--r-sm)">Volgens de projectlijst staat er in Clockify <b>${fmtHM(A.trackedSec)}</b> uur. De registraties in je bestanden zijn samen <b>${fmtHM(sec)}</b> uur (${Math.round(pct)}%).${pct < 98 ? ' Er ontbreken dus nog registraties: exporteer in Clockify het gedetailleerde rapport over een langere periode (of per jaar) en kies alle bestanden samen.' : ' Alles lijkt mee te zijn.'}</div>`;
+          return `<div class="card-body ${pct < 98 ? 'notice' : ''}" style="border-radius:var(--r-sm)">According to the project list, Clockify holds <b>${fmtHM(A.trackedSec)}</b> hours. The time entries in your files add up to <b>${fmtHM(sec)}</b> hours (${Math.round(pct)}%).${pct < 98 ? ' So some time entries are still missing: export the detailed report in Clockify over a longer period (or per year) and select all files together.' : ' Everything seems to be included.'}</div>`;
         })() : ''}
-        ${A.summaryOnly ? '<div class="card-body notice" style="border-radius:var(--r-sm)">Een <b>samenvattend</b> rapport bevat geen afzonderlijke registraties. Gebruik voor de uren <i>Reports → Detailed</i>.</div>' : ''}
-        ${A.dupes ? `<div class="muted small">${A.dupes} dubbele regels in de bestanden worden maar één keer geteld.</div>` : ''}
-        ${A.errors.length ? `<details class="notice"><summary><b>${A.errors.length}</b> regels kunnen niet gelezen worden en worden overgeslagen</summary><ul class="small">${A.errors.slice(0, 50).map(x => `<li>${esc(x)}</li>`).join('')}</ul></details>` : ''}
-        <div class="muted small">Alle projecten worden als <b>actief</b> aangemaakt, zodat je ook op oude projecten verder kan werken. Archiveren kan nadien op de pagina Projects. Uurtarieven en weekdoelen per medewerker stel je in bij Team.</div>
+        ${A.summaryOnly ? '<div class="card-body notice" style="border-radius:var(--r-sm)">A <b>summary</b> report does not contain individual time entries. Use <i>Reports → Detailed</i> for the time entries.</div>' : ''}
+        ${A.dupes ? `<div class="muted small">${A.dupes} duplicate rows in the files are counted only once.</div>` : ''}
+        ${A.errors.length ? `<details class="notice"><summary><b>${A.errors.length}</b> rows cannot be read and are skipped</summary><ul class="small">${A.errors.slice(0, 50).map(x => `<li>${esc(x)}</li>`).join('')}</ul></details>` : ''}
+        <div class="muted small">All projects are created as <b>active</b>, so you can keep working on old projects too. You can archive them later on the Projects page.</div>
         <div class="row"><button class="btn primary" id="i-go">${icon('up')}<span id="i-go-l"></span></button><span class="muted small" id="i-status"></span></div>
       </div>
     </div>`;
-  const label = () => { const n = count(); $('#i-go-l').textContent = n ? `${n} registraties importeren` : (A.projects.size ? 'Projecten en klanten importeren' : 'Niets te importeren'); $('#i-go').disabled = !n && !A.projects.size; };
+  const label = () => { const n = count(); $('#i-go-l').textContent = n ? `Import ${n} time entries` : (A.projects.size ? 'Import projects and clients' : 'Nothing to import'); $('#i-go').disabled = !n && !A.projects.size; };
   $$('[data-ukey]', el).forEach(sel => sel.onchange = () => { A.map.set(sel.dataset.ukey, sel.value); label(); });
   label();
   $('#i-go').onclick = async () => {
@@ -1909,7 +1910,7 @@ function renderImportPreview(el, A) {
     try {
       const r = await runImport(A, msg => status.textContent = msg);
       await loadBase(); S.imp = null; renderShell(); route();
-      toast(`Import klaar: ${r.added} registraties toegevoegd${r.skipped ? `, ${r.skipped} waren er al` : ''}.`);
+      toast(`Import done: ${r.added} time entries added${r.skipped ? `, ${r.skipped} already existed` : ''}.`);
     } catch (err) { fail(err); btn.disabled = false; status.textContent = ''; }
   };
 }
@@ -1925,17 +1926,17 @@ async function runImport(A, progress) {
     }
     return out;
   };
-  progress('Klanten aanmaken…');
+  progress('Creating clients…');
   S.clients.push(...await ins('clients', plan.newClients.map(name => ({ name }))));
   const clientId = new Map(S.clients.map(c => [lc(c.name), c.id]));
-  progress('Projecten aanmaken…');
+  progress('Creating projects…');
   let ci = S.projects.length;
   S.projects.push(...await ins('projects', plan.newProjects.map(p => ({
     name: p.name, client_id: clientId.get(lc(p.client)) || null, billable: p.billable, color: PROJECT_COLORS[ci++ % PROJECT_COLORS.length],
     budget_hours: p.budget_hours ?? null, hourly_rate: p.hourly_rate ?? null
   }))));
   const projectId = new Map(S.projects.map(p => [lc(p.name) + '|' + lc(clientOf(p)?.name), p.id]));
-  progress('Tags aanmaken…');
+  progress('Creating tags…');
   S.tags.push(...await ins('tags', plan.newTags.map(name => ({ name }))));
   const tagId = new Map(S.tags.map(t => [lc(t.name), t.id]));
 
@@ -1949,7 +1950,7 @@ async function runImport(A, progress) {
   }));
   let added = 0;
   for (let i = 0; i < rows.length; i += 500) {
-    progress(`Registraties importeren… ${i} / ${rows.length}`);
+    progress(`Importing time entries… ${i} / ${rows.length}`);
     const { data, error } = await sb.from('time_entries').upsert(rows.slice(i, i + 500), { onConflict: 'source_ref', ignoreDuplicates: true }).select('id');
     if (error) throw error;
     added += data.length;

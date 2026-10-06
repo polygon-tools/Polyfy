@@ -2,7 +2,7 @@
 
 Interne urenregistratie (alternatief voor Clockify) — statische website + Supabase.
 
-**Functies** (paginanamen zoals in Clockify)
+**Functies** (indeling, uitzicht en Engelse teksten zoals in Clockify)
 - **Time Tracker**: timer met omschrijving, project, tags, factureerbaar (€), start/stop, of manueel met start- en eindtijd. Daaronder je registraties per week en per dag, rechtstreeks aan te passen.
 - **Dashboard**: totale tijd, topproject en topklant, staafgrafiek per dag, verdeling (ring) per project/klant/tag/medewerker en de meest geregistreerde activiteiten, voor jezelf of (beheerders) het hele team.
 - **Calendar**: week- of dagweergave met zoom; klik op een leeg vak om uren toe te voegen, klik op een blok om te bewerken. Beheerders kunnen de kalender van elke collega bekijken.

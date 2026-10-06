@@ -1,7 +1,7 @@
 # Polyfy — projectcontext voor Claude
 
 Polyfy is een **interne urenregistratie-website** (vervanger voor Clockify, dat betalend werd) voor het team van Polygon (Seppe). Hoofddoel: elke collega vult zijn/haar uren in per project; periodiek (bv. eind van de maand) worden de gegevens opgevraagd en geëxporteerd (Reports → PDF/CSV). Geen facturatie/uurtarieven.
-Taal van de UI, commits en communicatie: **Nederlands (Vlaams)**.
+Taal: de **UI is Engels** (zoals Clockify, op vraag van Seppe); commits, documentatie en communicatie met Seppe in het **Nederlands (Vlaams)**. Datums Engels zoals Clockify ("Tue, Sep 29", `fmtDate` met en-US; numerieke datums en-GB dd/mm/jjjj), tijden altijd 24-uurs.
 
 ## Stack
 - Statische site zonder build-stap: `index.html` (alle CSS), `app.js` (alle logica, vanilla JS), `config.js` (Supabase-URL + anon key).
@@ -10,7 +10,7 @@ Taal van de UI, commits en communicatie: **Nederlands (Vlaams)**.
 - Hosting: GitHub Pages vanaf de root van `main` → `https://polygon-tools.github.io/Polyfy/`.
 
 ## Functies (allemaal aanwezig)
-- Uitzicht en indeling volgen Clockify zo dicht mogelijk (Seppe: "mag bijna een kopie zijn"): witte bovenbalk (logo, POLYGON, avatar = profiel), wit zijmenu met hoofdletters en secties ANALYZE/MANAGE, Clockify-blauw `#03a9f4`, Roboto, rechte hoeken (2px), grijze dagkoppen (`--head`), knoppen in hoofdletters, groene staven in Reports. Eigen naam/logo Polyfy behouden. Paginanamen Engels, overige UI Nederlands. Geen Timesheet. Startpagina = Time Tracker. Duren als `hh:mm:ss` (`fmtHMS`).
+- Uitzicht en indeling volgen Clockify zo dicht mogelijk (Seppe: "mag bijna een kopie zijn"): witte bovenbalk (logo, POLYGON, avatar = profiel), wit zijmenu met hoofdletters en secties ANALYZE/MANAGE, Clockify-blauw `#03a9f4`, Roboto, rechte hoeken (2px), grijze dagkoppen (`--head`), knoppen in hoofdletters, groene staven in Reports. Eigen naam/logo Polyfy behouden. Alle UI-teksten Engels met Clockify-termen (What have you worked on?, Week total, Summary/Detailed/Weekly, Group by, Add new member, Admin/Member…). Geen Timesheet. Startpagina = Time Tracker. Duren als `hh:mm:ss` (`fmtHMS`).
 - Gedeelde UI-bouwstenen in `app.js`: `openMenu` (uitklapmenu), `pickFrom`/`pickProject` (keuzelijst met zoeken, projecten per klant), periodekiezer `rangeHtml`/`bindRange` (`RANGES`, `rangeOf`, `shiftRange`), grafieken `barChart` (ook gestapeld via `segs`) en `donut`, `buckets` (dag/week/maand), `groupKeys`/`groupRows`/`groupText`.
 - Time Tracker: balk met modus timer (start/stop) of manueel (start–einde als 24-uurs tekstvelden via `parseHM`, datum, duur via `parseDur`). Daaronder per week (weektotaal) en per dag (dagtotaal) de eigen registraties; gelijke registraties op een dag gegroepeerd met teller (uitklappen). Inline bewerken: omschrijving, project, tags, €, start/einde, datum; ⋮ = bewerken/dupliceren/verwijderen.
 - Calendar: Week/Dag, zoom (−/+), collega kiezen (admin), periodekiezer; klik leeg vak = toevoegen, klik blok = bewerken.
