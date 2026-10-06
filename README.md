@@ -24,10 +24,10 @@ Interne urenregistratie (alternatief voor Clockify) — statische website + Supa
 3. **Sleutels** — kopieer onder *Project Settings → API* de *Project URL* en de *anon public* key naar [`config.js`](config.js).
    Zet eventueel `ALLOWED_EMAIL_DOMAIN` op het domein van je bedrijf.
 4. **Auth-instellingen** — onder *Authentication → URL Configuration*: zet *Site URL* op het adres van je site
-   (bv. `https://seppe3d.github.io/polyfy/`) zodat bevestigings- en resetmails juist terugverwijzen.
+   (bv. `https://polygon-tools.github.io/Polyfy/`) zodat bevestigings- en resetmails juist terugverwijzen.
    Wil je geen bevestigingsmail? Zet dan *Authentication → Providers → Email → Confirm email* uit.
 5. **Online zetten** — via GitHub Pages (Settings → Pages → *Deploy from a branch*, map `/ (root)`):
-   de app staat dan op `https://seppe3d.github.io/polyfy/`. Elke push naar die branch zet de nieuwe versie online.
+   de app staat dan op `https://polygon-tools.github.io/Polyfy/`. Elke push naar die branch zet de nieuwe versie online.
 6. Maak als eerste je eigen account aan (→ beheerder) en deel daarna de link uit de pagina *Team* met je collega's.
 
 > Tip: wil je inschrijven volledig afsluiten voor buitenstaanders, zet dan in Supabase

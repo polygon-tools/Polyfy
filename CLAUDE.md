@@ -7,7 +7,7 @@ Taal van de UI, commits en communicatie: **Nederlands (Vlaams)**.
 - Statische site zonder build-stap: `index.html` (alle CSS), `app.js` (alle logica, vanilla JS), `config.js` (Supabase-URL + anon key).
 - Backend: **Supabase** (auth met e-mail/wachtwoord + Postgres). supabase-js v2 via CDN (jsdelivr).
 - Database: `supabase/schema.sql` (idempotent, uit te voeren in de Supabase SQL Editor).
-- Hosting: GitHub Pages vanaf de root van `main` → `https://seppe3d.github.io/polyfy/`.
+- Hosting: GitHub Pages vanaf de root van `main` → `https://polygon-tools.github.io/Polyfy/`.
 
 ## Functies (allemaal aanwezig)
 - Timerbalk bovenaan elke pagina (omschrijving, project, factureerbaar €, start/stop) + manuele registratie.
@@ -31,6 +31,9 @@ Taal van de UI, commits en communicatie: **Nederlands (Vlaams)**.
 - Nieuwe databasewijzigingen: toevoegen als apart bestand `supabase/schema-vN-<naam>.sql` (idempotent) en vermelden in de README.
 
 ## Status / openstaand
-- Code is af en getest met een nep-Supabase in een headless browser (alle pagina's zonder fouten), **nog niet tegen een echt Supabase-project**.
-- Seppe moet nog: Supabase-project maken, `schema.sql` uitvoeren, `config.js` invullen, Site URL instellen, GitHub Pages aanzetten (zie README).
+- Repo staat in de organisatie: `polygon-tools/Polyfy`. Gebruik in links/tekst nooit een persoonlijke GitHub-naam.
+- Supabase: `schema.sql` is uitgevoerd; Site URL en Redirect URL staan op `https://polygon-tools.github.io/Polyfy/`.
+- `config.js` is ingevuld (project-URL + anon key van het echte Supabase-project).
+- GitHub Pages staat aan (branch `main`, map `/ (root)`) → `https://polygon-tools.github.io/Polyfy/`.
+- Code is getest met een nep-Supabase in een headless browser; eerste test tegen het echte project (account aanmaken → admin) moet nog gebeuren.
 - Mogelijke uitbreidingen die ooit gevraagd kunnen worden: tags, taken binnen projecten, goedkeuren van timesheets, PDF-export, verlof/afwezigheden.

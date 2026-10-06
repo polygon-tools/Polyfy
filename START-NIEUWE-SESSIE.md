@@ -1,4 +1,4 @@
-# Plak dit als eerste bericht in een nieuwe Claude Code-sessie (met repo seppe3D/polyfy)
+# Plak dit als eerste bericht in een nieuwe Claude Code-sessie (met repo polygon-tools/Polyfy)
 
 Dit is mijn project Polyfy: een interne urenregistratie-website (vervanger voor Clockify) met Supabase als backend.
 Lees eerst CLAUDE.md voor alle context.
