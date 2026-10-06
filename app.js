@@ -25,10 +25,9 @@ const S = {
   cal: { from: null, user: null, mode: 'week', zoom: 48 },
   rep: { from: null, to: null, user: '', project: '', client: '', tag: '', desc: '', g1: 'project', g2: 'description', tab: 'summary', open: new Set() },
   team: { status: 'active', role: '', q: '' },
-  proj: { search: '', status: 'active', client: '' },
+  proj: { search: '', status: 'active', client: '', sort: 'name', dir: 1 },
   trk: { limit: 50, open: new Set() },
-  dash: { from: null, to: null, group: 'project', who: 'me' },
-  imp: null
+  dash: { from: null, to: null, group: 'project', who: 'me' }
 };
 
 // ---------- Kleine hulpjes ----------
@@ -38,6 +37,7 @@ const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': 
 const pad = n => String(n).padStart(2, '0');
 const isAdmin = () => S.me?.role === 'admin';
 const byId = (list, id) => list.find(x => x.id === id);
+const lc = v => String(v ?? '').trim().toLowerCase();
 const debounce = (fn, ms) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
 
 function toast(msg, isErr = false) {
@@ -172,6 +172,8 @@ async function loadBase() {
   ]);
   for (const r of [pr, pj, cl, run]) if (r.error) throw r.error;
   S.profiles = pr.data; S.projects = pj.data; S.clients = cl.data; S.running = run.data;
+  // Geïmporteerde uren met mijn (bevestigd) e-mailadres automatisch aan mij koppelen (schema-v5; zonder v5 gewoon overslaan)
+  await sb.rpc('claim_my_entries').then(() => {}, () => {});
   S.me = byId(S.profiles, S.session.user.id);
   // Tags bestaan pas na schema-v2-tags-import.sql; zonder die tabel werkt de rest gewoon verder.
   const tg = await sb.from('tags').select('*').order('name');
@@ -333,9 +335,9 @@ function renderAuth(mode, msg = null) {
 const NAV = [
   ['tracker', 'Time Tracker', 'clock'], ['calendar', 'Calendar', 'cal'],
   ['dashboard', 'Dashboard', 'dash', 'Analyze'], ['reports', 'Reports', 'rep'],
-  ['projects', 'Projects', 'proj', 'Manage'], ['team', 'Team', 'team'], ['clients', 'Clients', 'client'], ['tags', 'Tags', 'tag'], ['import', 'Import', 'up']
+  ['projects', 'Projects', 'proj', 'Manage'], ['team', 'Team', 'team'], ['clients', 'Clients', 'client'], ['tags', 'Tags', 'tag']
 ];
-const navItems = () => NAV.filter(n => n[0] !== 'import' || isAdmin());
+const navItems = () => NAV;
 const DEFAULT_VIEW = 'tracker';
 
 function renderShell() {
@@ -377,7 +379,7 @@ function route() {
 function refreshPage() {
   const page = $('#page'); if (!page) return;
   ({ tracker: renderTracker, calendar: renderCalendar, dashboard: renderDashboard, reports: renderReports,
-     projects: renderProjects, team: renderTeam, clients: renderClients, tags: renderTags, import: renderImport })[S.view](page)
+     projects: renderProjects, team: renderTeam, clients: renderClients, tags: renderTags })[S.view](page)
     .catch(fail);
 }
 
@@ -1373,6 +1375,13 @@ async function renderProjects(page) {
     .filter(p => P.status === 'all' || (P.status === 'archived') === p.archived)
     .filter(p => !P.client || (P.client === '__none' ? !p.client_id : p.client_id === P.client))
     .filter(p => !P.search || (p.name + ' ' + (clientOf(p)?.name || '')).toLowerCase().includes(P.search.toLowerCase()));
+  // Sorteren: naam (standaard A-Z), klant of geregistreerde tijd; klik nogmaals = omkeren
+  const secs = p => Number(tot.get(p.id)?.total_seconds || 0);
+  const cmp = { name: (a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }),
+    client: (a, b) => (clientOf(a)?.name || '~').localeCompare(clientOf(b)?.name || '~', undefined, { sensitivity: 'base' }) || a.name.localeCompare(b.name),
+    tracked: (a, b) => secs(a) - secs(b) }[P.sort];
+  list.sort((a, b) => cmp(a, b) * P.dir);
+  const sortTh = (k, label, cls = '') => `<th class="${cls}"><button class="sortbtn ${P.sort === k ? 'on' : ''}" data-sort="${k}">${label}<span class="arr">${P.sort === k ? (P.dir > 0 ? '▲' : '▼') : '▲▼'}</span></button></th>`;
 
   page.innerHTML = `
     <div class="page-head"><div><h1>Projects</h1><div class="muted">${list.length} of ${S.projects.length} projects</div></div>${isAdmin() ? `<button class="btn primary" id="p-new">Create new project</button>` : ''}</div>
@@ -1380,9 +1389,10 @@ async function renderProjects(page) {
       <input id="p-search" placeholder="Search by name" value="${esc(P.search)}" style="min-width:240px">
       <select id="p-client" aria-label="Client"><option value="">All clients</option><option value="__none" ${P.client === '__none' ? 'selected' : ''}>Without client</option>${S.clients.map(c => `<option value="${c.id}" ${c.id === P.client ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select>
       <div class="seg" id="p-status">${[['active', 'Active'], ['archived', 'Archived'], ['all', 'All']].map(([k, l]) => `<button data-s="${k}" class="${P.status === k ? 'on' : ''}">${l}</button>`).join('')}</div>
+      <div class="seg" id="p-sort" title="Sort by name"><button data-az="1" class="${P.sort === 'name' && P.dir > 0 ? 'on' : ''}">A-Z</button><button data-az="-1" class="${P.sort === 'name' && P.dir < 0 ? 'on' : ''}">Z-A</button></div>
     </div>
     <div class="card table-wrap">
-      ${list.length ? `<table><thead><tr><th>Name</th><th>Client</th><th class="r">Tracked</th>${isAdmin() ? '<th></th>' : ''}</tr></thead><tbody>
+      ${list.length ? `<table><thead><tr>${sortTh('name', 'Name')}${sortTh('client', 'Client')}${sortTh('tracked', 'Tracked', 'r')}${isAdmin() ? '<th></th>' : ''}</tr></thead><tbody>
       ${list.map(p => `<tr data-id="${p.id}">
           <td><a href="#reports" data-rep class="proj" style="color:var(--text);text-decoration:none"><span class="dot" style="background:${esc(p.color)}"></span>${esc(p.name)}</a>${p.archived ? ' <span class="tag">archived</span>' : ''}</td>
           <td>${esc(clientOf(p)?.name || '–')}</td>
@@ -1395,6 +1405,8 @@ async function renderProjects(page) {
   search.oninput = debounce(() => { P.search = search.value; refreshPage(); setTimeout(() => { const s = $('#p-search'); s?.focus(); s?.setSelectionRange(s.value.length, s.value.length); }); }, 250);
   $('#p-client').onchange = e => { P.client = e.target.value; refreshPage(); };
   $$('#p-status button').forEach(b => b.onclick = () => { P.status = b.dataset.s; refreshPage(); });
+  $$('#p-sort [data-az]').forEach(b => b.onclick = () => { P.sort = 'name'; P.dir = Number(b.dataset.az); refreshPage(); });
+  $$('[data-sort]').forEach(b => b.onclick = () => { const k = b.dataset.sort; P.dir = P.sort === k ? -P.dir : (k === 'tracked' ? -1 : 1); P.sort = k; refreshPage(); });
   $$('[data-rep]').forEach(a => a.onclick = ev => {
     const [from, to] = rangeOf('year');
     Object.assign(S.rep, { project: a.closest('tr').dataset.id, client: '', tag: '', desc: '', from, to, tab: 'summary', g1: isAdmin() ? 'user' : 'day', g2: '' });
@@ -1682,282 +1694,6 @@ function openMemberModal(p) {
     Object.assign(p, data);
     closeModal(); toast('Member saved'); refreshPage();
   };
-}
-
-// =====================================================================
-// Importeren (Clockify: gedetailleerd rapport en/of projectlijst als CSV)
-// =====================================================================
-function parseCsv(text) {
-  text = text.replace(/^﻿/, '');
-  const head = text.slice(0, text.search(/\r?\n|$/));
-  const delim = (head.match(/;/g) || []).length > (head.match(/,/g) || []).length ? ';' : ',';
-  const rows = []; let row = [], f = '', q = false;
-  for (let i = 0; i < text.length; i++) {
-    const c = text[i];
-    if (q) { if (c !== '"') f += c; else if (text[i + 1] === '"') { f += '"'; i++; } else q = false; }
-    else if (c === '"') q = true;
-    else if (c === delim) { row.push(f); f = ''; }
-    else if (c === '\n') { row.push(f); rows.push(row); row = []; f = ''; }
-    else if (c !== '\r') f += c;
-  }
-  if (f || row.length) { row.push(f); rows.push(row); }
-  return rows.filter(r => r.some(x => x.trim()));
-}
-
-// Kolomnamen van Clockify (Engels en Nederlands), vergeleken zonder spaties/leestekens
-const IMP_COLS = {
-  project: ['project', 'projectnaam', 'name', 'naam'], client: ['client', 'klant'],
-  description: ['description', 'beschrijving', 'omschrijving'], user: ['user', 'gebruiker', 'medewerker'],
-  email: ['email'], tags: ['tags', 'tag'], billable: ['billable', 'billability', 'factureerbaar'],
-  sdate: ['startdate', 'startdatum'], stime: ['starttime', 'starttijd'], edate: ['enddate', 'einddatum'], etime: ['endtime', 'eindtijd'],
-  dur: ['durationdecimal', 'duurdecimaal'],
-  // Enkel in de projectexport
-  tracked: ['trackedh', 'geregistreerdu'], estimate: ['estimatedh', 'geschatu'], rate: ['billablerateeur', 'billablerate', 'uurtarief']
-};
-// Clockify schrijft soms "(Without client)" e.d. in plaats van een leeg veld
-const impVal = v => /^\((without|zonder) [^)]*\)$/i.test(v) ? '' : v;
-const lc = v => String(v ?? '').trim().toLowerCase();
-const PENDING = '__pending';
-const isYes = v => /^(yes|ja|true|1|y|j)$/i.test(String(v).trim());
-
-function parseClock(t) {
-  const m = String(t).trim().match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?\s*([ap]\.?m\.?)?$/i);
-  if (!m) return null;
-  let h = Number(m[1]);
-  if (m[4]) { const pm = /^p/i.test(m[4]); if (h === 12) h = pm ? 12 : 0; else if (pm) h += 12; }
-  return [h, Number(m[2]), Number(m[3] || 0)];
-}
-
-function analyzeImport(files) {
-  const A = { files: [], entries: [], users: new Map(), projects: new Map(), clients: new Map(), tags: new Map(), errors: [], dupes: 0 };
-  const raw = [];
-  for (const file of files) {
-    const rows = parseCsv(file.text);
-    const norm = (rows[0] || []).map(h => lc(h).replace(/[^a-z]/g, ''));
-    const ix = Object.fromEntries(Object.entries(IMP_COLS).map(([k, names]) => [k, norm.findIndex(h => names.includes(h))]));
-    const get = (r, k) => ix[k] >= 0 ? impVal(String(r[ix[k]] ?? '').trim()) : '';
-    const num = v => v === '' ? null : Number(v.replace(',', '.')) || null;
-    const isReport = ix.sdate >= 0 && ix.stime >= 0;
-    if (!isReport && ix.project < 0) { A.files.push({ name: file.name, kind: 'unknown', n: 0 }); A.errors.push(`${file.name}: columns not recognized (expected a Clockify export).`); continue; }
-    // Een samenvattend rapport heeft geen datums: daaruit komen enkel projecten en klanten
-    const kind = isReport ? 'time entries' : ix.tracked >= 0 ? 'project list' : 'projects only, no time entries';
-    if (!isReport && ix.tracked < 0) A.summaryOnly = true;
-    A.files.push({ name: file.name, kind, n: rows.length - 1 });
-    rows.slice(1).forEach((r, i) => {
-      const o = { line: i + 2, file: file.name, project: get(r, 'project'), client: get(r, 'client'), billable: ix.billable < 0 || isYes(get(r, 'billable')) };
-      if (o.client) A.clients.set(lc(o.client), o.client);
-      if (o.project) {
-        const k = lc(o.project) + '|' + lc(o.client), p = A.projects.get(k) || { name: o.project, client: o.client, billable: o.billable };
-        if (isReport) { if (o.billable) p.billable = true; }
-        else if (ix.tracked >= 0) {
-          // Projectlijst: instellingen overnemen en Clockify-totaal bijhouden om te controleren of alle uren mee zijn
-          Object.assign(p, { billable: o.billable, budget_hours: num(get(r, 'estimate')), hourly_rate: num(get(r, 'rate')) });
-          A.trackedSec = (A.trackedSec || 0) + (num(get(r, 'tracked')) || 0) * 3600;
-        }
-        A.projects.set(k, p);
-      }
-      if (!isReport) return;
-      Object.assign(o, { description: get(r, 'description'), user: get(r, 'user'), email: get(r, 'email'), sdate: get(r, 'sdate'), stime: get(r, 'stime'), edate: get(r, 'edate'), etime: get(r, 'etime'), dur: get(r, 'dur') });
-      o.tags = get(r, 'tags').split(',').map(t => t.trim()).filter(Boolean);
-      o.tags.forEach(t => A.tags.set(lc(t), A.tags.get(lc(t)) || t));
-      raw.push(o);
-    });
-  }
-
-  // Datumvolgorde bepalen: dd/mm/jjjj (standaard), mm/dd/jjjj of jjjj-mm-dd
-  const parts = raw.flatMap(o => [o.sdate, o.edate]).filter(Boolean).map(d => d.split(/[./-]/).map(Number));
-  const order = parts.some(p => String(p[0]).length === 4 || p[0] > 31) ? 'ymd' : parts.some(p => p[1] > 12) ? 'mdy' : 'dmy';
-  const toDate = (d, t) => {
-    const p = d.split(/[./-]/).map(Number), c = parseClock(t);
-    if (p.length !== 3 || !c) return null;
-    const [y, m, dd] = order === 'ymd' ? p : order === 'mdy' ? [p[2], p[0], p[1]] : [p[2], p[1], p[0]];
-    const x = new Date(y < 100 ? 2000 + y : y, m - 1, dd, ...c);
-    return isNaN(x) ? null : x;
-  };
-
-  const refs = new Set();
-  for (const o of raw) {
-    const start = toDate(o.sdate, o.stime);
-    let end = o.etime ? toDate(o.edate || o.sdate, o.etime) : null;
-    if (!end && start && o.dur) end = new Date(start.getTime() + Number(o.dur.replace(',', '.')) * 3600000);
-    if (start && end && end < start) end = addDays(end, 1);
-    if (!start || !end || isNaN(end)) { A.errors.push(`${o.file}, row ${o.line}: unreadable date or time (${o.sdate} ${o.stime} - ${o.edate} ${o.etime})`); continue; }
-    const ukey = lc(o.email) || lc(o.user);
-    if (!ukey) { A.errors.push(`${o.file}, row ${o.line}: no user`); continue; }
-    const ref = ['clockify', ukey, start.toISOString(), end.toISOString(), lc(o.project), lc(o.description)].join('|');
-    if (refs.has(ref)) { A.dupes++; continue; }
-    refs.add(ref);
-    const u = A.users.get(ukey) || { key: ukey, name: o.user, email: o.email, n: 0, sec: 0 };
-    u.n++; u.sec += (end - start) / 1000; A.users.set(ukey, u);
-    A.entries.push({ ukey, project: o.project, client: o.client, description: o.description, tags: o.tags, billable: o.billable, start, end, ref });
-  }
-  if (A.entries.length) {
-    A.from = new Date(Math.min(...A.entries.map(e => e.start)));
-    A.to = new Date(Math.max(...A.entries.map(e => e.start)));
-  }
-  // Medewerkers automatisch koppelen: eerst op e-mail, anders op naam
-  // Geen account: wachten tot de collega er een maakt (indien schema-v3), behalve verwijderde Clockify-gebruikers
-  A.map = new Map([...A.users.values()].map(u => [u.key,
-    (S.profiles.find(p => lc(p.email) === lc(u.email) && u.email) || S.profiles.find(p => lc(p.full_name) === lc(u.name) && u.name))?.id
-    || (S.pendingReady && u.email && !/^deleteduser/i.test(u.name) ? PENDING : '')]));
-  return A;
-}
-
-// Wat moet er nieuw aangemaakt worden?
-function importPlan(A) {
-  const clientIds = new Map(S.clients.map(c => [lc(c.name), c.id]));
-  const newClients = [...A.clients.entries()].filter(([k]) => !clientIds.has(k)).map(([, n]) => n);
-  const existing = new Set(S.projects.map(p => lc(p.name) + '|' + lc(clientOf(p)?.name)));
-  const newProjects = [...A.projects.entries()].filter(([k]) => !existing.has(k)).map(([, p]) => p);
-  const newTags = [...A.tags.entries()].filter(([k]) => !S.tags.some(t => lc(t.name) === k)).map(([, n]) => n);
-  return { newClients, newProjects, newTags };
-}
-
-async function renderImport(page) {
-  // schema-v3 aanwezig? Dan ook importeren voor collega's zonder account
-  const un = S.tagsReady ? await sb.rpc('unclaimed_imports') : { error: true };
-  if (S.view !== 'import') return;
-  S.pendingReady = !un.error;
-  const A = S.imp;
-  page.innerHTML = `
-    <div class="page-head"><div><h1>Import</h1><div class="muted">Move time entries, projects, clients and tags from Clockify to Polyfy</div></div></div>
-    ${S.tagsReady ? '' : '<div class="card card-body notice">First run <code>supabase/schema-v2-tags-import.sql</code> in the Supabase SQL Editor and reload this page. Importing is not possible without that update.</div>'}
-    ${S.tagsReady && !S.pendingReady ? '<div class="card card-body notice">Also run <code>supabase/schema-v3-import-zonder-account.sql</code> to import time for teammates without an account. It is linked automatically once they sign up.</div>' : ''}
-    ${un.data?.length ? `<div class="card table-wrap">
-      <div class="card-head"><h2>Waiting for an account</h2><span class="muted small">linked automatically when someone signs up with this email address</span></div>
-      <table><thead><tr><th>From Clockify</th><th class="r">Time entries</th><th class="r">Hours</th><th>Link now to</th></tr></thead><tbody>
-      ${un.data.map(r => `<tr><td><b>${esc(r.import_name || r.import_email)}</b><br><span class="muted small">${esc(r.import_email)}</span></td><td class="r num">${r.entries}</td><td class="r num">${fmtHM(Number(r.seconds))}</td>
-        <td><div class="row" style="flex-wrap:nowrap"><select data-claim="${esc(r.import_email)}" aria-label="Account"><option value="">Wait for account</option>${S.profiles.map(p => `<option value="${p.id}">${esc(p.full_name || p.email)} (${esc(p.email)})</option>`).join('')}</select><button class="btn" data-claim-go>Link</button></div></td></tr>`).join('')}
-      </tbody></table>
-    </div>` : ''}
-    <div class="card">
-      <div class="card-head"><h2>1. Export from Clockify</h2></div>
-      <div class="card-body">
-        <ol style="margin:0;padding-left:20px;display:flex;flex-direction:column;gap:6px">
-          <li><b>Time entries:</b> <i>Reports → Detailed</i>, choose the full period (from your very first entry), then <i>Export → Save as CSV</i>. If one long period does not work, export per year and select all files together below.</li>
-          <li><b>All projects</b> (including old ones without entries in the export): <i>Projects</i>, filter on <i>Active</i> and <i>Archived</i>, and export the list as CSV. Optional.</li>
-          <li>${S.pendingReady ? 'Teammates do not need an account yet: their time is linked once they sign up with the same email address as in Clockify.' : 'Ask teammates to <b>sign up</b> in Polyfy first: time entries are linked to their account by email address.'}</li>
-        </ol>
-      </div>
-    </div>
-    <div class="card">
-      <div class="card-head"><h2>2. Choose the CSV files</h2></div>
-      <div class="card-body row">
-        <input type="file" id="i-file" accept=".csv,text/csv" multiple ${S.tagsReady ? '' : 'disabled'}>
-        ${A ? `<span class="muted small">${A.files.map(f => `${esc(f.name)} (${f.n} rows, ${f.kind})`).join(' · ')}</span>` : ''}
-      </div>
-    </div>
-    <div id="i-preview"></div>`;
-  $('#i-file').onchange = async e => {
-    const files = await Promise.all([...e.target.files].map(async f => ({ name: f.name, text: await f.text() })));
-    if (!files.length) return;
-    S.imp = analyzeImport(files);
-    refreshPage();
-  };
-  $$('[data-claim-go]', page).forEach(b => b.onclick = async () => {
-    const sel = $('select', b.parentElement);
-    if (!sel.value) return toast('Choose an account first.', true);
-    const { data, error } = await sb.rpc('assign_imported', { p_email: sel.dataset.claim, p_user: sel.value });
-    if (error) return fail(error);
-    toast(`${data} time entries linked`); refreshPage();
-  });
-  if (A) renderImportPreview($('#i-preview'), A);
-}
-
-function renderImportPreview(el, A) {
-  const plan = importPlan(A);
-  const users = [...A.users.values()].sort((a, b) => b.n - a.n);
-  const count = () => A.entries.filter(e => A.map.get(e.ukey)).length;
-  const list = (title, items) => items.length ? `<details><summary><b>${items.length}</b> ${title}</summary><div class="row" style="gap:6px;margin-top:8px">${items.map(x => `<span class="tag">${esc(x)}</span>`).join('')}</div></details>` : '';
-  el.innerHTML = `
-    <div class="tiles">
-      <div class="card tile"><div class="label">Time entries</div><div class="value num">${A.entries.length}</div><div class="sub">${A.from ? `${esc(fmtDate(A.from, { month: 'short', day: 'numeric', year: 'numeric' }))} - ${esc(fmtDate(A.to, { month: 'short', day: 'numeric', year: 'numeric' }))}` : 'none'}</div></div>
-      <div class="card tile"><div class="label">Hours</div><div class="value num">${fmtHM(A.entries.reduce((t, e) => t + (e.end - e.start) / 1000, 0))}</div><div class="sub">${users.length} users</div></div>
-      <div class="card tile"><div class="label">Projects</div><div class="value num">${A.projects.size}</div><div class="sub">${plan.newProjects.length} new</div></div>
-      <div class="card tile"><div class="label">Clients · tags</div><div class="value num">${A.clients.size} · ${A.tags.size}</div><div class="sub">${plan.newClients.length} + ${plan.newTags.length} new</div></div>
-    </div>
-    ${users.length ? `<div class="card table-wrap">
-      <div class="card-head"><h2>3. Match users</h2><span class="muted small">automatically by email or name</span></div>
-      <table><thead><tr><th>In Clockify</th><th class="r">Time entries</th><th class="r">Hours</th><th>Account in Polyfy</th></tr></thead><tbody>
-      ${users.map(u => `<tr><td><b>${esc(u.name || u.email)}</b><br><span class="muted small">${esc(u.email)}</span></td><td class="r num">${u.n}</td><td class="r num">${fmtHM(u.sec)}</td>
-        <td><select data-ukey="${esc(u.key)}" aria-label="Account for ${esc(u.name)}"><option value="">Do not import</option>${S.pendingReady && u.email ? `<option value="${PENDING}" ${A.map.get(u.key) === PENDING ? 'selected' : ''}>Link when ${esc(u.email)} signs up</option>` : ''}${S.profiles.map(p => `<option value="${p.id}" ${A.map.get(u.key) === p.id ? 'selected' : ''}>${esc(p.full_name || p.email)} (${esc(p.email)})</option>`).join('')}</select></td></tr>`).join('')}
-      </tbody></table>
-      <div class="card-body muted small" style="border-top:1px solid var(--line)">${S.pendingReady
-        ? 'Teammates without an account: their time is imported now and linked automatically once they sign up with the same email address. Until then only admins see it (in Reports).'
-        : 'Someone without an account yet? Ask them to sign up first and import the same file again later: what was already imported is skipped.'}</div>
-    </div>` : ''}
-    <div class="card">
-      <div class="card-head"><h2>${users.length ? '4' : '3'}. Import</h2></div>
-      <div class="card-body" style="display:flex;flex-direction:column;gap:10px">
-        ${list('new clients', plan.newClients)}
-        ${list('new projects', plan.newProjects.map(p => p.name + (p.client ? ' · ' + p.client : '')))}
-        ${list('new tags', plan.newTags)}
-        ${A.trackedSec ? (() => {
-          const sec = A.entries.reduce((t, e) => t + (e.end - e.start) / 1000, 0), pct = sec / A.trackedSec * 100;
-          return `<div class="card-body ${pct < 98 ? 'notice' : ''}" style="border-radius:var(--r-sm)">According to the project list, Clockify holds <b>${fmtHM(A.trackedSec)}</b> hours. The time entries in your files add up to <b>${fmtHM(sec)}</b> hours (${Math.round(pct)}%).${pct < 98 ? ' So some time entries are still missing: export the detailed report in Clockify over a longer period (or per year) and select all files together.' : ' Everything seems to be included.'}</div>`;
-        })() : ''}
-        ${A.summaryOnly ? '<div class="card-body notice" style="border-radius:var(--r-sm)">A <b>summary</b> report does not contain individual time entries. Use <i>Reports → Detailed</i> for the time entries.</div>' : ''}
-        ${A.dupes ? `<div class="muted small">${A.dupes} duplicate rows in the files are counted only once.</div>` : ''}
-        ${A.errors.length ? `<details class="notice"><summary><b>${A.errors.length}</b> rows cannot be read and are skipped</summary><ul class="small">${A.errors.slice(0, 50).map(x => `<li>${esc(x)}</li>`).join('')}</ul></details>` : ''}
-        <div class="muted small">All projects are created as <b>active</b>, so you can keep working on old projects too. You can archive them later on the Projects page.</div>
-        <div class="row"><button class="btn primary" id="i-go">${icon('up')}<span id="i-go-l"></span></button><span class="muted small" id="i-status"></span></div>
-      </div>
-    </div>`;
-  const label = () => { const n = count(); $('#i-go-l').textContent = n ? `Import ${n} time entries` : (A.projects.size ? 'Import projects and clients' : 'Nothing to import'); $('#i-go').disabled = !n && !A.projects.size; };
-  $$('[data-ukey]', el).forEach(sel => sel.onchange = () => { A.map.set(sel.dataset.ukey, sel.value); label(); });
-  label();
-  $('#i-go').onclick = async () => {
-    const btn = $('#i-go'), status = $('#i-status');
-    btn.disabled = true;
-    try {
-      const r = await runImport(A, msg => status.textContent = msg);
-      await loadBase(); S.imp = null; renderShell(); route();
-      toast(`Import done: ${r.added} time entries added${r.skipped ? `, ${r.skipped} already existed` : ''}.`);
-    } catch (err) { fail(err); btn.disabled = false; status.textContent = ''; }
-  };
-}
-
-async function runImport(A, progress) {
-  const plan = importPlan(A);
-  const ins = async (table, rows) => {
-    const out = [];
-    for (let i = 0; i < rows.length; i += 500) {
-      const { data, error } = await sb.from(table).insert(rows.slice(i, i + 500)).select();
-      if (error) throw error;
-      out.push(...data);
-    }
-    return out;
-  };
-  progress('Creating clients…');
-  S.clients.push(...await ins('clients', plan.newClients.map(name => ({ name }))));
-  const clientId = new Map(S.clients.map(c => [lc(c.name), c.id]));
-  progress('Creating projects…');
-  let ci = S.projects.length;
-  S.projects.push(...await ins('projects', plan.newProjects.map(p => ({
-    name: p.name, client_id: clientId.get(lc(p.client)) || null, billable: p.billable, color: PROJECT_COLORS[ci++ % PROJECT_COLORS.length],
-    budget_hours: p.budget_hours ?? null, hourly_rate: p.hourly_rate ?? null
-  }))));
-  const projectId = new Map(S.projects.map(p => [lc(p.name) + '|' + lc(clientOf(p)?.name), p.id]));
-  progress('Creating tags…');
-  S.tags.push(...await ins('tags', plan.newTags.map(name => ({ name }))));
-  const tagId = new Map(S.tags.map(t => [lc(t.name), t.id]));
-
-  const rows = A.entries.filter(e => A.map.get(e.ukey)).map(e => ({
-    ...(A.map.get(e.ukey) === PENDING
-      ? { user_id: null, import_email: lc(A.users.get(e.ukey).email), import_name: A.users.get(e.ukey).name }
-      : { user_id: A.map.get(e.ukey) }),
-    project_id: e.project ? projectId.get(lc(e.project) + '|' + lc(e.client)) || null : null,
-    description: e.description, billable: e.billable, start_at: e.start.toISOString(), end_at: e.end.toISOString(),
-    tag_ids: e.tags.map(t => tagId.get(lc(t))).filter(Boolean), source_ref: e.ref
-  }));
-  let added = 0;
-  for (let i = 0; i < rows.length; i += 500) {
-    progress(`Importing time entries… ${i} / ${rows.length}`);
-    const { data, error } = await sb.from('time_entries').upsert(rows.slice(i, i + 500), { onConflict: 'source_ref', ignoreDuplicates: true }).select('id');
-    if (error) throw error;
-    added += data.length;
-  }
-  return { added, skipped: rows.length - added };
 }
 
 init().catch(fail);

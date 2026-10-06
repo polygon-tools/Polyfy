@@ -295,6 +295,11 @@ table.weekly tfoot th{border-top:1px solid var(--line-strong)}
 .side-list .desc{min-width:0}
 .side-list .desc>div{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 
+.sortbtn{background:none;border:0;padding:0;font:inherit;color:inherit;text-transform:inherit;letter-spacing:inherit;cursor:pointer;display:inline-flex;align-items:center;gap:4px}
+.sortbtn .arr{font-size:9px;color:var(--line-strong)}
+.sortbtn.on,.sortbtn.on .arr{color:var(--accent)}
+th.r .sortbtn{justify-content:flex-end;width:100%}
+
 /* ---------- Team ---------- */
 .rate{display:inline-flex;align-items:center;gap:10px}
 .rate .num{min-width:70px;display:inline-block;background:var(--surface-2);padding:4px 8px;border-radius:4px}

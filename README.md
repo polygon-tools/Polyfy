@@ -8,7 +8,6 @@ Interne urenregistratie (alternatief voor Clockify) — statische website + Supa
 - **Calendar**: week- of dagweergave met zoom; klik op een leeg vak om uren toe te voegen, klik op een blok om te bewerken. Beheerders kunnen de kalender van elke collega bekijken.
 - **Reports**: Samenvatting, Gedetailleerd en Wekelijks, met filters op team, klant, project, tag en omschrijving. Exporteren als **PDF** of **CSV** (opent in Excel).
 - **Projects**: zoeken, filteren per klant, kleur, archiveren. **Clients** en **Tags** hebben elk een eigen pagina.
-- **Import** (beheerders): registraties, projecten, klanten en tags overzetten uit een Clockify-export (CSV).
 - **Team**: leden met e-mail en rol; filteren en zoeken, rollen aanpassen, accounts deactiveren, nieuwe leden vooraf klaarzetten met een rol en uitnodigen.
 
 **Rechten**
@@ -43,21 +42,15 @@ Nieuwe functies die de database wijzigen komen als apart script in `supabase/`. 
 |---|---|
 | [`supabase/schema-v2-tags-import.sql`](supabase/schema-v2-tags-import.sql) | tags en importeren uit Clockify |
 | [`supabase/schema-v3-import-zonder-account.sql`](supabase/schema-v3-import-zonder-account.sql) | uren importeren voor collega's die nog geen account hebben |
-| [`supabase/schema-v4-uitnodigingen.sql`](supabase/schema-v4-uitnodigingen.sql) | collega's vooraf klaarzetten met een rol; maakt info@polygon3d.be (zaakvoerder) beheerder |
+| [`supabase/schema-v4-uitnodigingen.sql`](supabase/schema-v4-uitnodigingen.sql) | collega's vooraf klaarzetten met een rol |
+| [`supabase/schema-v5-automatisch-koppelen.sql`](supabase/schema-v5-automatisch-koppelen.sql) | geïmporteerde uren automatisch koppelen bij het inloggen |
 
 ## Overzetten vanuit Clockify
 
-1. Voer `schema-v2-tags-import.sql` en `schema-v3-import-zonder-account.sql` uit (zie hierboven).
-2. Collega's hoeven nog geen account te hebben: hun uren worden geïmporteerd en automatisch gekoppeld zodra ze zich
-   registreren (en hun e-mail bevestigen) met **hetzelfde e-mailadres als in Clockify**. Tot dan ziet enkel een beheerder ze.
-   Ander e-mailadres gebruikt? Koppel ze dan manueel onder *Importeren → Wachten op een account*.
-3. In Clockify: *Reports → Detailed*, kies de volledige periode, *Export → Save as CSV*. Optioneel ook de projectlijst
-   (*Projects*, actief én gearchiveerd) als CSV, zodat ook oude projecten zonder uren in de export meekomen.
-4. In Polyfy (als beheerder): *Importeren*, kies de bestanden, controleer de koppeling van medewerkers en klik *Importeren*.
-   Klanten, projecten en tags die nog niet bestaan worden aangemaakt; alle projecten komen als *actief* binnen.
-5. Opnieuw importeren is veilig: registraties die al geïmporteerd zijn worden overgeslagen.
-
-Niet in de export, dus achteraf zelf instellen: weekdoelen per medewerker (in Team).
+1. In Clockify: *Reports → **Detailed*** (niet *Summary*), per jaar, *Export → Save as CSV*. Optioneel ook *Projects* als CSV.
+2. Zet de bestanden om met `tools/clockify_naar_sql.py` (zie de uitleg bovenaan dat script) en voer het resultaat uit in de Supabase SQL Editor.
+   Opnieuw uitvoeren is veilig: wat er al is, wordt overgeslagen.
+3. Collega's maken zelf een account met hetzelfde e-mailadres als in Clockify. Bij het inloggen komen hun uren automatisch bij hen te staan.
 
 ## Lokaal testen
 
@@ -78,4 +71,5 @@ python3 -m http.server 8000
 | `supabase/schema.sql` | tabellen, beveiliging (RLS) en functies |
 | `supabase/schema-v2-tags-import.sql` | update: tags en import |
 | `supabase/schema-v3-import-zonder-account.sql` | update: import voor collega's zonder account |
-| `supabase/schema-v4-uitnodigingen.sql` | update: uitnodigingen met rol, zaakvoerder als beheerder |
+| `supabase/schema-v4-uitnodigingen.sql` | update: uitnodigingen met rol |
+| `supabase/schema-v5-automatisch-koppelen.sql` | update: uren automatisch koppelen bij login |

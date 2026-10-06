@@ -1,12 +1,15 @@
 # Zet Clockify-exports (gedetailleerd rapport + projectexport) om naar één SQL-bestand voor de Supabase SQL Editor.
-# Gebruik: python3 tools/clockify_naar_sql.py uit.sql supabase/schema-v2-tags-import.sql supabase/schema-v3-import-zonder-account.sql export1.csv [export2.csv …]
+# Gebruik: python3 tools/clockify_naar_sql.py uit.sql supabase/schema-v2-*.sql … supabase/schema-v5-*.sql export1.csv [export2.csv …]
+# Alle opgegeven .sql-bestanden (database-updates) komen in volgorde vooraan, zodat de eindtoestand klopt.
 # Zelfde regels als renderImport in app.js (kolommen, "(Without …)", datumvolgorde, source_ref), dus geen dubbels met de importpagina.
 # Het resultaat bevat persoonsgegevens: NIET in de repo zetten.
 import csv, re, sys
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
-out_path, schema_v2, schema_v3, *files = sys.argv[1:]
+out_path, *rest = sys.argv[1:]
+schemas = [f for f in rest if f.endswith('.sql')]
+files = [f for f in rest if not f.endswith('.sql')]
 TZ = ZoneInfo('Europe/Brussels')
 COLORS = ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#008300', '#4a3aa7', '#e34948']
 COLS = {
@@ -80,11 +83,11 @@ def values(rows, fmt):
 sql = [f"""-- =====================================================================
 -- Polyfy - volledige import uit Clockify (gegenereerd)
 -- Plak dit volledige bestand in Supabase > SQL Editor en klik Run.
--- Bevat: schema-v2 (tags/import), schema-v3 (import zonder account) en de data.
+-- Bevat: de database-updates (v2 t.e.m. de laatste) en de data.
 -- Opnieuw uitvoeren mag: wat er al is wordt overgeslagen.
 -- Inhoud: {len(clients)} klanten, {len(projects)} projecten, {len(tags)} tags, {len(entries)} registraties.
 -- =====================================================================
-""", open(schema_v2).read(), open(schema_v3).read(), f"""
+""", *[open(f).read() for f in schemas], f"""
 -- =====================================================================
 -- Data
 -- =====================================================================
@@ -125,7 +128,7 @@ insert into public.time_entries (user_id, import_email, import_name, project_id,
     array(select t.id from public.tags t where lower(t.name) in (select lower(x) from unnest(i.tags) x)),
     i.ref
   from imp_entries i
-  left join public.profiles pr on lower(pr.email) = i.email
+  left join auth.users pr on lower(pr.email) = i.email and pr.email_confirmed_at is not null
   on conflict (source_ref) do nothing;
 
 select set_config('polyfy.claiming', '', true);

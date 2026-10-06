@@ -3,7 +3,7 @@
 -- Voer dit uit in Supabase > SQL Editor, NA schema.sql, v2 en v3.
 -- Het script is idempotent: opnieuw uitvoeren mag.
 --
--- Een beheerder zet een e-mailadres + naam + rol klaar (pagina Team > Nieuw lid toevoegen).
+-- Een beheerder zet een e-mailadres + naam + rol klaar (pagina Team > Add new member).
 -- Wie zich met dat e-mailadres registreert, krijgt meteen die rol; de uitnodiging verdwijnt dan.
 -- =====================================================================
 
@@ -54,13 +54,3 @@ begin
   new.email := old.email;
   return new;
 end $$;
-
--- Zaakvoerder: beheerder. Heeft die al een account, dan meteen beheerder maken; anders klaarzetten.
-begin;
-select set_config('polyfy.sql_admin', '1', true);
-update public.profiles set role = 'admin' where lower(email) = 'info@polygon3d.be';
-commit;
-insert into public.invites (email, full_name, role)
-  select 'info@polygon3d.be', '', 'admin'
-  where not exists (select 1 from public.profiles where lower(email) = 'info@polygon3d.be')
-on conflict (email) do update set role = 'admin';
