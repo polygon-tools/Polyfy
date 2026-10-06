@@ -9,7 +9,7 @@ Interne urenregistratie (alternatief voor Clockify) — statische website + Supa
 - **Reports**: Samenvatting, Gedetailleerd en Wekelijks, met filters op team, klant, project, tag en omschrijving. Exporteren als **PDF** of **CSV** (opent in Excel).
 - **Projects**: zoeken, filteren per klant, kleur, archiveren. **Clients** en **Tags** hebben elk een eigen pagina.
 - **Import** (beheerders): registraties, projecten, klanten en tags overzetten uit een Clockify-export (CSV).
-- **Team**: leden met e-mail, uurtarief en rol; filteren en zoeken, rollen en tarieven aanpassen, accounts deactiveren, nieuwe leden uitnodigen.
+- **Team**: leden met e-mail en rol; filteren en zoeken, rollen aanpassen, accounts deactiveren, nieuwe leden vooraf klaarzetten met een rol en uitnodigen.
 
 **Rechten**
 - De eerste persoon die een account maakt wordt automatisch **beheerder**; alle volgende zijn **medewerker**.
@@ -43,6 +43,7 @@ Nieuwe functies die de database wijzigen komen als apart script in `supabase/`. 
 |---|---|
 | [`supabase/schema-v2-tags-import.sql`](supabase/schema-v2-tags-import.sql) | tags en importeren uit Clockify |
 | [`supabase/schema-v3-import-zonder-account.sql`](supabase/schema-v3-import-zonder-account.sql) | uren importeren voor collega's die nog geen account hebben |
+| [`supabase/schema-v4-uitnodigingen.sql`](supabase/schema-v4-uitnodigingen.sql) | collega's vooraf klaarzetten met een rol; maakt info@polygon3d.be (zaakvoerder) beheerder |
 
 ## Overzetten vanuit Clockify
 
@@ -56,7 +57,7 @@ Nieuwe functies die de database wijzigen komen als apart script in `supabase/`. 
    Klanten, projecten en tags die nog niet bestaan worden aangemaakt; alle projecten komen als *actief* binnen.
 5. Opnieuw importeren is veilig: registraties die al geïmporteerd zijn worden overgeslagen.
 
-Niet in de export, dus achteraf zelf instellen: uurtarieven, budgetten en weekdoelen.
+Niet in de export, dus achteraf zelf instellen: weekdoelen per medewerker (in Team).
 
 ## Lokaal testen
 
@@ -77,3 +78,4 @@ python3 -m http.server 8000
 | `supabase/schema.sql` | tabellen, beveiliging (RLS) en functies |
 | `supabase/schema-v2-tags-import.sql` | update: tags en import |
 | `supabase/schema-v3-import-zonder-account.sql` | update: import voor collega's zonder account |
+| `supabase/schema-v4-uitnodigingen.sql` | update: uitnodigingen met rol, zaakvoerder als beheerder |

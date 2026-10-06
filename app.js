@@ -90,7 +90,6 @@ const fmtClock = sec => { sec = Math.max(0, Math.floor(sec)); return `${Math.flo
 const fmtHMS = sec => { sec = Math.max(0, Math.round(sec)); return `${pad(Math.floor(sec / 3600))}:${pad(Math.floor(sec / 60) % 60)}:${pad(sec % 60)}`; };
 const fmtHM = sec => { const m = Math.round(Math.max(0, sec) / 60); return `${Math.floor(m / 60)}:${pad(m % 60)}`; };
 const fmtDec = sec => (sec / 3600).toLocaleString('nl-BE', { maximumFractionDigits: 2 });
-const fmtMoney = v => v.toLocaleString('nl-BE', { style: 'currency', currency: CFG.CURRENCY || 'EUR' });
 
 const entryStart = e => new Date(e.start_at);
 const entryEnd = e => e.end_at ? new Date(e.end_at) : new Date();
@@ -121,8 +120,6 @@ const byName = (a, b) => a.name.localeCompare(b.name);
 const tagField = ids => S.tagsReady ? { tag_ids: ids || [] } : {};
 const tagNames = ids => (ids || []).map(id => byId(S.tags, id)?.name).filter(Boolean);
 const tagChips = ids => tagNames(ids).map(n => ` <span class="tag">${esc(n)}</span>`).join('');
-const rateFor = e => Number(profileOf(e.user_id)?.hourly_rate || 0);
-const amountFor = (e, sec) => e.billable ? (sec / 3600) * rateFor(e) : 0;
 const initials = name => (name || '?').split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0].toUpperCase()).join('');
 const userColor = id => PROJECT_COLORS[[...String(id)].reduce((a, c) => a + c.charCodeAt(0), 0) % PROJECT_COLORS.length];
 const avatar = p => `<span class="avatar" style="background:${userColor(p?.id)}" aria-hidden="true">${esc(initials(p?.full_name || p?.email))}</span>`;
@@ -342,15 +339,16 @@ const DEFAULT_VIEW = 'tracker';
 
 function renderShell() {
   app.innerHTML = `<div class="shell" id="shell">
+    <header class="topbar">
+      <button class="btn icon ghost nav-toggle" id="nav-toggle" aria-label="Menu">${icon('menu')}</button>
+      <div class="brand">${LOGO}<span>Polyfy</span></div>
+      <span class="ws">POLYGON</span>
+      <button class="me" id="me-btn" title="${esc(S.me.full_name || S.me.email)} · Profiel & instellingen" aria-label="Profiel & instellingen">${avatar(S.me)}</button>
+    </header>
     <aside class="side">
-      <div class="brand">${LOGO}Polyfy</div>
       <nav class="nav">${navItems().map(([k, l, i, sec]) => `${sec ? `<div class="nav-sec">${sec}</div>` : ''}<a href="#${k}" data-nav="${k}">${icon(i)}<span>${l}</span>${k === 'tracker' ? '<span class="nav-clock num" id="nav-clock"></span>' : ''}</a>`).join('')}</nav>
-      <div class="side-foot">
-        <button class="me" id="me-btn" title="Profiel & instellingen">${avatar(S.me)}<div class="who"><div style="font-weight:600">${esc(S.me.full_name || S.me.email)}</div><div class="muted small">${isAdmin() ? 'Beheerder' : 'Medewerker'}</div></div></button>
-      </div>
     </aside>
     <div class="main">
-      <div class="mobile-top"><button class="btn icon ghost" id="nav-toggle" aria-label="Menu">${icon('menu')}</button>Polyfy</div>
       <div class="content" id="page"></div>
     </div>
   </div>`;
@@ -786,7 +784,7 @@ function niceMax(v) {
   return Math.ceil(v / 1000) * 1000;
 }
 // data: [{ label, value (uren), tip }]
-function barChart(el, data, { height = 220, showValues = true } = {}) {
+function barChart(el, data, { height = 220, showValues = true, color = 'var(--bar)' } = {}) {
   const draw = () => {
     const W = el.clientWidth || 600, H = height;
     const padL = 36, padR = 8, padT = 18, padB = 26;
@@ -809,7 +807,7 @@ function barChart(el, data, { height = 220, showValues = true } = {}) {
         // Gestapeld: segmenten van onder naar boven, met een dun wit randje ertussen
         let yb = padT + ih;
         for (const g of d.segs) { const sh = max ? g.value / max * ih : 0; if (sh < 0.3) continue; s += `<rect x="${x}" y="${yb - sh}" width="${bw}" height="${sh}" fill="${esc(g.color)}" stroke="var(--surface)" stroke-width="1"/>`; yb -= sh; }
-      } else if (h > 0.5) s += `<path class="bar" fill="var(--bar)" d="M${x},${padT + ih} V${y + r} Q${x},${y} ${x + r},${y} H${x + bw - r} Q${x + bw},${y} ${x + bw},${y + r} V${padT + ih} Z"/>`;
+      } else if (h > 0.5) s += `<path class="bar" fill="${color}" d="M${x},${padT + ih} V${y + r} Q${x},${y} ${x + r},${y} H${x + bw - r} Q${x + bw},${y} ${x + bw},${y + r} V${padT + ih} Z"/>`;
       if (showValues && d.value > 0 && data.length <= 14) s += `<text class="barval" x="${cx}" y="${y - 5}" text-anchor="middle">${esc(d.valueLabel ?? fmtHM(d.value * 3600))}</text>`;
       if (i % labelEvery === 0) s += `<g class="axis"><text x="${cx}" y="${H - 8}" text-anchor="middle">${esc(d.label)}</text></g>`;
       s += `<rect class="hit" x="${padL + band * i}" y="${padT}" width="${band}" height="${ih}" data-tip="${esc(d.tip)}"/>`;
@@ -1155,7 +1153,6 @@ async function renderReports(page) {
 
   const secOf = e => clipSec(e, from, to);
   const total = entries.reduce((a, e) => a + secOf(e), 0);
-  const amount = entries.reduce((a, e) => a + amountFor(e, secOf(e)), 0);
   const groups = GROUPS.filter(g => isAdmin() || g[0] !== 'user').filter(g => S.tagsReady || g[0] !== 'tag');
   const fbtn = (k, label, val) => `<button class="fbtn ${val ? 'on' : ''}" data-f="${k}">${label}${val ? `: <b>${esc(val)}</b>` : ''}${icon('down')}</button>`;
   const nameOfFilter = {
@@ -1180,7 +1177,6 @@ async function renderReports(page) {
     <div class="card">
       <div class="sumband">
         <span>Totaal: <b class="num">${fmtHMS(total)}</b></span>
-        ${amount > 0 ? `<span>Bedrag: <b class="num">${fmtMoney(amount)}</b></span>` : ''}
         <span class="muted small">${entries.length} registraties</span>
       </div>
       <div class="card-body"><div class="chart" id="r-chart"></div></div>
@@ -1192,7 +1188,7 @@ async function renderReports(page) {
   barChart($('#r-chart'), bk.map(k => {
     const sec = entries.reduce((t, e) => t + clipSec(e, k.a, k.b), 0);
     return { label: k.label, value: sec / 3600, valueLabel: fmtHMS(sec), tip: `<b>${esc(k.tip)}</b><br>${fmtHMS(sec)}` };
-  }), { showValues: bk.length <= 14 });
+  }), { showValues: bk.length <= 14, color: 'var(--bar-rep)' });
 
   const body = $('#r-body');
   if (R.tab === 'summary') {
@@ -1203,11 +1199,11 @@ async function renderReports(page) {
       <div class="card-head"><div class="row small"><span class="muted">Groeperen op</span>
         <select id="r-g1" aria-label="Groeperen op">${groups.map(([k, l]) => `<option value="${k}" ${R.g1 === k ? 'selected' : ''}>${l}</option>`).join('')}</select>
         <select id="r-g2" aria-label="Daarna op"><option value="">(geen)</option>${groups.filter(g => g[0] !== R.g1).map(([k, l]) => `<option value="${k}" ${R.g2 === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div></div>
-      ${rows.length ? `<div class="sum-split"><div class="table-wrap"><table class="tree"><thead><tr><th>Titel</th><th class="r">Duur</th>${amount > 0 ? '<th class="r">Bedrag</th>' : ''}<th class="r" style="width:70px">%</th></tr></thead><tbody>
+      ${rows.length ? `<div class="sum-split"><div class="table-wrap"><table class="tree"><thead><tr><th>Titel</th><th class="r">Duur</th><th class="r" style="width:70px">%</th></tr></thead><tbody>
         ${rows.map(r => {
           const kids = sub(r), open = R.open.has(r.k);
-          return `<tr class="g1"><td>${kids.length ? `<button class="cnt ${open ? 'on' : ''}" data-open="${esc(r.k)}">${kids.length}</button>` : ''}${name(r, R.g1)}</td><td class="r num"><b>${fmtHMS(r.sec)}</b></td>${amount > 0 ? `<td class="r num">${fmtMoney(r.amt)}</td>` : ''}<td class="r num muted">${total ? Math.round(r.sec / total * 100) : 0}%</td></tr>`
-            + (open ? kids.map(c => `<tr class="g2"><td>${name(c, R.g2)}</td><td class="r num">${fmtHMS(c.sec)}</td>${amount > 0 ? `<td class="r num">${fmtMoney(c.amt)}</td>` : ''}<td></td></tr>`).join('') : '');
+          return `<tr class="g1"><td>${kids.length ? `<button class="cnt ${open ? 'on' : ''}" data-open="${esc(r.k)}">${kids.length}</button>` : ''}${name(r, R.g1)}</td><td class="r num"><b>${fmtHMS(r.sec)}</b></td><td class="r num muted">${total ? Math.round(r.sec / total * 100) : 0}%</td></tr>`
+            + (open ? kids.map(c => `<tr class="g2"><td>${name(c, R.g2)}</td><td class="r num">${fmtHMS(c.sec)}</td><td></td></tr>`).join('') : '');
         }).join('')}</tbody></table>
         ${R.g1 === 'tag' || R.g2 === 'tag' ? '<div class="muted small" style="padding:10px 16px">Registraties met meerdere tags tellen bij elke tag mee.</div>' : ''}</div>
         <div class="donut-wrap">${donut(rows.map(r => ({ name: groupText(r, R.g1), sec: r.sec, color: r.color })), total)}</div></div>`
@@ -1273,9 +1269,9 @@ function groupKeys(e, group) {
 function groupRows(entries, group, secOf) {
   const g = new Map();
   for (const e of entries) for (const k of groupKeys(e, group)) {
-    const row = g.get(k) || { k, sample: e, sec: 0, bill: 0, amt: 0, n: 0 };
+    const row = g.get(k) || { k, sample: e, sec: 0, bill: 0, n: 0 };
     const s = secOf(e);
-    row.sec += s; row.bill += e.billable ? s : 0; row.amt += amountFor(e, s); row.n++;
+    row.sec += s; row.bill += e.billable ? s : 0; row.n++;
     g.set(k, row);
   }
   return [...g.values()].sort((a, b) => group === 'day' ? a.k.localeCompare(b.k) : b.sec - a.sec);
@@ -1347,12 +1343,11 @@ async function exportPdf(entries, from, to) {
 
 function exportCsv(entries, from, to) {
   const q = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
-  const head = ['Datum', 'Start', 'Einde', 'Duur (u:mm)', 'Duur (decimaal)', 'Medewerker', 'E-mail', 'Klant', 'Project', 'Omschrijving', 'Tags', 'Factureerbaar', 'Tarief', 'Bedrag'];
+  const head = ['Datum', 'Start', 'Einde', 'Duur (u:mm)', 'Duur (decimaal)', 'Medewerker', 'E-mail', 'Klant', 'Project', 'Omschrijving', 'Tags', 'Factureerbaar'];
   const rows = [...entries].sort((a, b) => entryStart(a) - entryStart(b)).map(e => {
     const p = projectOf(e), u = profileOf(e.user_id), sec = entrySec(e);
     return [ymd(entryStart(e)), hm(entryStart(e)), e.end_at ? hm(entryEnd(e)) : '', fmtHM(sec), (sec / 3600).toFixed(2).replace('.', ','),
-      u?.full_name || e.import_name, u?.email || e.import_email, clientOf(p)?.name, p?.name, e.description, tagNames(e.tag_ids).join(', '), e.billable ? 'Ja' : 'Nee',
-      rateFor(e).toFixed(2).replace('.', ','), amountFor(e, sec).toFixed(2).replace('.', ',')];
+      u?.full_name || e.import_name, u?.email || e.import_email, clientOf(p)?.name, p?.name, e.description, tagNames(e.tag_ids).join(', '), e.billable ? 'Ja' : 'Nee'];
   });
   const csv = '﻿' + [head, ...rows].map(r => r.map(q).join(';')).join('\r\n');
   const a = document.createElement('a');
@@ -1545,12 +1540,14 @@ function openClientModal(c) {
 // =====================================================================
 async function renderTeam(page) {
   const T = S.team;
-  const [sum, un] = await Promise.all([
+  const [sum, un, inv] = await Promise.all([
     sb.rpc('team_summary', { week_start: startOfWeek(new Date()).toISOString() }),
-    isAdmin() && S.tagsReady ? sb.rpc('unclaimed_imports') : Promise.resolve({ data: [] })
+    isAdmin() && S.tagsReady ? sb.rpc('unclaimed_imports') : Promise.resolve({ data: [] }),
+    isAdmin() ? sb.from('invites').select('*').order('email') : Promise.resolve({ data: [] })
   ]);
   if (sum.error) throw sum.error;
   if (S.view !== 'team') return;
+  S.invitesReady = isAdmin() && !inv.error;
   const live = new Map(sum.data.filter(r => r.running_since).map(r => [r.user_id, r]));
   const q = T.q.toLowerCase();
   const match = (name, email) => !q || `${name} ${email}`.toLowerCase().includes(q);
@@ -1559,12 +1556,20 @@ async function renderTeam(page) {
     .filter(p => !T.role || p.role === T.role)
     .filter(p => match(p.full_name, p.email))
     .sort((a, b) => (a.full_name || a.email).localeCompare(b.full_name || b.email));
-  // Wie nog geen account heeft maar wel uren uit Clockify (wordt gekoppeld bij registratie)
-  const pending = (un.error ? [] : un.data || []).filter(r => T.status !== 'inactive' && !T.role && match(r.import_name || '', r.import_email));
-  const roleTag = p => `<span class="tag ${p.role === 'admin' ? 'admin' : ''}">${p.role === 'admin' ? 'Beheerder' : 'Medewerker'}</span>`;
+  // Nog geen account: uitgenodigd (invites) en/of uren uit Clockify (unclaimed_imports), samengevoegd per e-mail
+  const waiting = new Map();
+  for (const i of inv.error ? [] : inv.data || []) waiting.set(lc(i.email), { email: lc(i.email), name: i.full_name, role: i.role, invited: true, entries: 0 });
+  for (const r of un.error ? [] : un.data || []) {
+    const w = waiting.get(r.import_email) || { email: r.import_email, name: r.import_name, role: 'member', invited: false, entries: 0 };
+    w.entries = r.entries; w.name = w.name || r.import_name; waiting.set(r.import_email, w);
+  }
+  const pending = [...waiting.values()].filter(w => !S.profiles.some(p => lc(p.email) === w.email))
+    .filter(w => T.status !== 'inactive' && (!T.role || w.role === T.role) && match(w.name || '', w.email))
+    .sort((a, b) => (a.name || a.email).localeCompare(b.name || b.email));
+  const roleTag = role => `<span class="tag ${role === 'admin' ? 'admin' : ''}">${role === 'admin' ? 'Beheerder' : 'Medewerker'}</span>`;
 
   page.innerHTML = `
-    <div class="page-head"><h1>Team</h1>${isAdmin() ? `<button class="btn primary" id="tm-add">${icon('plus')}Nieuw lid toevoegen</button>` : ''}</div>
+    <div class="page-head"><h1>Team</h1>${isAdmin() ? `<button class="btn primary" id="tm-add">Nieuw lid toevoegen</button>` : ''}</div>
     <div class="card filterbar">
       <span class="flabel">Filter</span>
       <select id="tm-status" aria-label="Status"><option value="active">Actief</option><option value="inactive" ${T.status === 'inactive' ? 'selected' : ''}>Gedeactiveerd</option><option value="all" ${T.status === 'all' ? 'selected' : ''}>Alle</option></select>
@@ -1573,20 +1578,19 @@ async function renderTeam(page) {
     </div>
     <div class="card table-wrap">
       <div class="card-head"><span class="muted small">Leden</span><span class="muted small">${members.length + pending.length}</span></div>
-      ${members.length || pending.length ? `<table><thead><tr><th>Naam</th><th>E-mail</th>${isAdmin() ? `<th>Uurtarief (${esc(CFG.CURRENCY || 'EUR')})</th>` : ''}<th>Rol</th>${isAdmin() ? '<th></th>' : ''}</tr></thead><tbody>
+      ${members.length || pending.length ? `<table><thead><tr><th>Naam</th><th>E-mail</th><th>Rol</th>${isAdmin() ? '<th></th>' : ''}</tr></thead><tbody>
       ${members.map(p => {
         const l = live.get(p.id), pj = l && byId(S.projects, l.running_project);
         return `<tr data-id="${p.id}">
           <td><span class="row" style="flex-wrap:nowrap">${avatar(p)}<span>${esc(p.full_name || p.email)}${p.id === S.me.id ? ' <span class="muted">(jij)</span>' : ''}
             ${l ? `<br><span class="tag live" title="Sinds ${hm(new Date(l.running_since))}">● aan het werk${pj ? ' · ' + esc(pj.name) : ''}</span>` : ''}${p.active ? '' : ' <span class="tag off">gedeactiveerd</span>'}</span></span></td>
           <td>${esc(p.email)}</td>
-          ${isAdmin() ? `<td><span class="rate"><span class="num">${Number(p.hourly_rate) ? fmtMoney(Number(p.hourly_rate)) : '–'}</span><button class="linkbtn" data-rate>Wijzig</button></span></td>` : ''}
-          <td>${isAdmin() && p.id !== S.me.id ? `<button class="rolebtn" data-role>${roleTag(p)}</button>` : roleTag(p)}</td>
+          <td>${isAdmin() && p.id !== S.me.id ? `<button class="rolebtn" data-role>${roleTag(p.role)}</button>` : roleTag(p.role)}</td>
           ${isAdmin() ? `<td class="r"><button class="btn icon ghost" data-more aria-label="Meer">${icon('dots')}</button></td>` : ''}
         </tr>`;
       }).join('')}
-      ${pending.map(r => `<tr><td><span class="row" style="flex-wrap:nowrap">${avatar({ id: r.import_email, full_name: r.import_name })}<span>${esc(r.import_name || r.import_email)}<br><span class="muted small">${r.entries} geïmporteerde registraties</span></span></span></td>
-        <td>${esc(r.import_email)}</td>${isAdmin() ? '<td class="muted">–</td>' : ''}<td><span class="tag">Nog geen account</span></td>${isAdmin() ? '<td></td>' : ''}</tr>`).join('')}
+      ${pending.map(w => `<tr data-pend="${esc(w.email)}"><td><span class="row" style="flex-wrap:nowrap">${avatar({ id: w.email, full_name: w.name || w.email })}<span>${esc(w.name || w.email)}<br><span class="muted small">${w.invited ? 'Uitgenodigd, nog geen account' : 'Nog geen account'}${w.entries ? ` · ${w.entries} geïmporteerde registraties` : ''}</span></span></span></td>
+        <td>${esc(w.email)}</td><td>${roleTag(w.role)}</td>${isAdmin() ? `<td class="r">${w.invited ? `<button class="btn icon ghost" data-pmore aria-label="Meer">${icon('dots')}</button>` : ''}</td>` : ''}</tr>`).join('')}
       </tbody></table>` : '<div class="empty">Geen leden gevonden.</div>'}
     </div>`;
 
@@ -1604,11 +1608,6 @@ async function renderTeam(page) {
   };
   $$('tr[data-id]', page).forEach(tr => {
     const p = profileOf(tr.dataset.id);
-    const rb = $('[data-rate]', tr);
-    if (rb) rb.onclick = () => openMenu(rb, `<div style="padding:8px;display:flex;gap:6px"><input type="number" min="0" step="0.01" value="${Number(p.hourly_rate) || ''}" placeholder="0,00" style="width:110px" aria-label="Uurtarief"><button class="btn primary">Opslaan</button></div>`, m => {
-      const inp = $('input', m), go = () => { closeMenu(); saveProfile(p, { hourly_rate: Number(inp.value || 0) }); };
-      $('button', m).onclick = go; inp.onkeydown = e => { if (e.key === 'Enter') go(); };
-    });
     const ro = $('[data-role]', tr);
     if (ro) ro.onclick = () => openMenu(ro, `<button class="mi ${p.role === 'admin' ? 'on' : ''}" data-v="admin">Beheerder</button><button class="mi ${p.role === 'member' ? 'on' : ''}" data-v="member">Medewerker</button>`, m => {
       $$('[data-v]', m).forEach(x => x.onclick = () => { closeMenu(); if (x.dataset.v !== p.role) saveProfile(p, { role: x.dataset.v }); });
@@ -1624,16 +1623,41 @@ async function renderTeam(page) {
       });
     });
   });
+  $$('tr[data-pend] [data-pmore]', page).forEach(b => b.onclick = () => openMenu(b, '<button class="mi danger" data-m="del">Uitnodiging intrekken</button>', m => {
+    $('[data-m]', m).onclick = async () => {
+      closeMenu();
+      const { error } = await sb.from('invites').delete().eq('email', b.closest('tr').dataset.pend);
+      if (error) return fail(error);
+      toast('Uitnodiging ingetrokken'); refreshPage();
+    };
+  }));
 }
 
 function openInviteModal() {
   const link = location.origin + location.pathname, dom = (CFG.ALLOWED_EMAIL_DOMAIN || '').trim();
   openModal('Nieuw lid toevoegen', `
-    <p style="margin:0">Stuur deze link naar je collega. Die maakt zelf een account met ${dom ? `een <b>@${esc(dom)}</b>-adres` : 'zijn of haar e-mailadres'} en verschijnt daarna hier als medewerker.</p>
-    <div class="row"><input readonly value="${esc(link)}" style="flex:1;min-width:200px" id="inv-link"><button class="btn" id="inv-copy">Kopiëren</button></div>
-    <p class="muted small" style="margin:0">Uren uit Clockify worden automatisch aan het account gekoppeld als je collega hetzelfde e-mailadres gebruikt als in Clockify.</p>`,
-    `<div></div><button class="btn primary" data-close>Klaar</button>`);
+    ${S.invitesReady ? `
+      <label class="field">E-mailadres<input id="inv-email" type="email" placeholder="naam@${esc(dom || 'bedrijf.be')}" required></label>
+      <div class="grid2">
+        <label class="field">Naam<input id="inv-name" placeholder="Voornaam Achternaam"></label>
+        <label class="field">Rol<select id="inv-role"><option value="member">Medewerker</option><option value="admin">Beheerder</option></select></label>
+      </div>
+      <p class="muted small" style="margin:0">Wie zich met dit e-mailadres registreert, krijgt meteen deze naam en rol.</p>`
+      : '<p class="muted small" style="margin:0">Voer <code>supabase/schema-v4-uitnodigingen.sql</code> uit om collega\'s vooraf met een rol klaar te zetten.</p>'}
+    <div class="field">Link om te delen<div class="row"><input readonly value="${esc(link)}" style="flex:1;min-width:200px" id="inv-link"><button class="btn" id="inv-copy">Kopiëren</button></div></div>
+    <p class="muted small" style="margin:0">Je collega maakt zelf een account via deze link${dom ? `, met een <b>@${esc(dom)}</b>-adres` : ''}. Uren uit Clockify worden automatisch gekoppeld als het e-mailadres hetzelfde is als in Clockify.</p>`,
+    `<div></div><div class="row"><button class="btn" data-close>Sluiten</button>${S.invitesReady ? '<button class="btn primary" id="inv-save">Toevoegen</button>' : ''}</div>`);
   $('#inv-copy').onclick = async () => { try { await navigator.clipboard.writeText(link); toast('Link gekopieerd'); } catch (_) { $('#inv-link').select(); } };
+  if (!S.invitesReady) return;
+  $('#inv-save').onclick = async () => {
+    const email = lc($('#inv-email').value);
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return toast('Geef een geldig e-mailadres in.', true);
+    if (dom && !email.endsWith('@' + dom.toLowerCase())) return toast(`Enkel adressen van @${dom} kunnen een account maken.`, true);
+    if (S.profiles.some(p => lc(p.email) === email)) return toast('Er bestaat al een account met dit e-mailadres.', true);
+    const { error } = await sb.from('invites').upsert({ email, full_name: $('#inv-name').value.trim(), role: $('#inv-role').value });
+    if (error) return fail(error);
+    closeModal(); toast('Toegevoegd. Deel de link zodat die collega een account kan maken.'); refreshPage();
+  };
 }
 
 function openMemberModal(p) {
@@ -1643,13 +1667,12 @@ function openMemberModal(p) {
     <label class="field">Naam<input id="mm-name" value="${esc(p.full_name)}"></label>
     <div class="grid2">
       <label class="field">Rol<select id="mm-role" ${self ? 'disabled' : ''}><option value="member" ${p.role === 'member' ? 'selected' : ''}>Medewerker</option><option value="admin" ${p.role === 'admin' ? 'selected' : ''}>Beheerder</option></select></label>
-      <label class="field">Uurtarief (${esc(CFG.CURRENCY || 'EUR')})<input id="mm-rate" type="number" min="0" step="0.01" value="${p.hourly_rate}"></label>
+      <label class="field">Weekdoel (uren)<input id="mm-target" type="number" min="0" max="168" step="0.5" value="${p.weekly_target}"></label>
     </div>
-    <label class="field">Weekdoel (uren)<input id="mm-target" type="number" min="0" max="168" step="0.5" value="${p.weekly_target}"></label>
     ${self ? '<div class="muted small">Je kan je eigen rol niet wijzigen of je eigen account deactiveren.</div>' : `<label class="check"><input type="checkbox" id="mm-active" ${p.active ? 'checked' : ''}> Actief (uitgeschakeld = kan niet meer registreren)</label>`}`,
     `<div></div><div class="row"><button class="btn" data-close>Annuleren</button><button class="btn primary" id="mm-save">Opslaan</button></div>`);
   $('#mm-save').onclick = async () => {
-    const row = { full_name: $('#mm-name').value.trim(), hourly_rate: Number($('#mm-rate').value || 0), weekly_target: Number($('#mm-target').value || 0) };
+    const row = { full_name: $('#mm-name').value.trim(), weekly_target: Number($('#mm-target').value || 0) };
     if (!self) { row.role = $('#mm-role').value; row.active = $('#mm-active').checked; }
     const { data, error } = await sb.from('profiles').update(row).eq('id', p.id).select().single();
     if (error) return fail(error);
