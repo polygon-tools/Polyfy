@@ -3,14 +3,13 @@
 Interne urenregistratie (alternatief voor Clockify) — statische website + Supabase.
 
 **Functies** (paginanamen zoals in Clockify)
-- **Time Tracker**: timer met omschrijving, project, tags, factureerbaar (€), start/stop, of registreer manueel. Daaronder je registraties per week.
-- **Timesheet**: weekoverzicht per project; vul de uren per dag rechtstreeks in.
-- **Dashboard**: uren vandaag / deze week (t.o.v. weekdoel) / deze maand, % factureerbaar, grafiek per dag, verdeling per project, recente registraties (opnieuw starten, bewerken, verwijderen). Beheerders zien wie er nu aan het werk is.
-- **Calendar**: weekweergave; klik op een leeg vak om uren toe te voegen, klik op een blok om te bewerken. Beheerders kunnen de kalender van elke collega bekijken.
-- **Reports**: periode (deze week, vorige maand, aangepast…), filters op medewerker, klant, project en tag. Samenvatting gegroepeerd op project / medewerker / klant / tag / dag / omschrijving, gedetailleerde lijst, bedragen, en export als **PDF** of **CSV** (opent in Excel).
+- **Time Tracker**: timer met omschrijving, project, tags, factureerbaar (€), start/stop, of manueel met start- en eindtijd. Daaronder je registraties per week en per dag, rechtstreeks aan te passen.
+- **Dashboard**: totale tijd, topproject en topklant, staafgrafiek per dag, verdeling (ring) per project/klant/tag/medewerker en de meest geregistreerde activiteiten, voor jezelf of (beheerders) het hele team.
+- **Calendar**: week- of dagweergave met zoom; klik op een leeg vak om uren toe te voegen, klik op een blok om te bewerken. Beheerders kunnen de kalender van elke collega bekijken.
+- **Reports**: Samenvatting, Gedetailleerd en Wekelijks, met filters op team, klant, project, tag en omschrijving. Exporteren als **PDF** of **CSV** (opent in Excel).
 - **Projects**: zoeken, filteren per klant, kleur, archiveren. **Clients** en **Tags** hebben elk een eigen pagina.
 - **Import** (beheerders): registraties, projecten, klanten en tags overzetten uit een Clockify-export (CSV).
-- **Team**: uren deze week t.o.v. weekdoel, wie nu werkt, rollen, uurtarieven, accounts deactiveren, uitnodigingslink.
+- **Team**: leden met e-mail, uurtarief en rol; filteren en zoeken, rollen en tarieven aanpassen, accounts deactiveren, nieuwe leden uitnodigen.
 
 **Rechten**
 - De eerste persoon die een account maakt wordt automatisch **beheerder**; alle volgende zijn **medewerker**.

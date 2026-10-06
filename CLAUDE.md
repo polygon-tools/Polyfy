@@ -10,15 +10,15 @@ Taal van de UI, commits en communicatie: **Nederlands (Vlaams)**.
 - Hosting: GitHub Pages vanaf de root van `main` → `https://polygon-tools.github.io/Polyfy/`.
 
 ## Functies (allemaal aanwezig)
-- Menu en paginanamen in het Engels zoals Clockify: Timesheet, Time Tracker, Calendar · *Analyze*: Dashboard, Reports · *Manage*: Projects, Team, Clients, Tags, Import (admin). De rest van de UI blijft Nederlands. Startpagina = Time Tracker.
-- Time Tracker: timer (omschrijving, project, tags, €, start/stop) + manuele registratie + eigen registraties per week. Lopende timer zichtbaar in het menu en de paginatitel.
-- Timesheet: week, rij per project, uren per dag rechtstreeks invullen (meer = registratie erbij na de laatste van die dag of vanaf 9:00; minder = laatste registraties van die dag inkorten/verwijderen). Admin kan collega kiezen.
-- Dashboard: KPI's vandaag/week (vs weekdoel)/maand/% factureerbaar, staafgrafiek per dag, verdeling per project, recente registraties; admins zien "nu aan het werk".
-- Kalender: weekweergave, klik leeg vak = toevoegen, klik blok = bewerken; admin kan collega kiezen.
-- Reports: periodes + filters (medewerker, klant, project, tag), samenvatting per project/medewerker/klant/tag/dag/omschrijving, gedetailleerde lijst, bedragen, CSV-export (`;`-gescheiden, BOM, voor Excel) en PDF-export (jsPDF + autotable, pas geladen bij eerste export via jsdelivr).
+- Indeling en paginanamen volgen Clockify (Seppe gaf screenshots als voorbeeld): Time Tracker, Calendar · *Analyze*: Dashboard, Reports · *Manage*: Projects, Team, Clients, Tags, Import (admin). Geen Timesheet (op vraag verwijderd). De rest van de UI blijft Nederlands. Startpagina = Time Tracker. Duren als `hh:mm:ss` (`fmtHMS`).
+- Gedeelde UI-bouwstenen in `app.js`: `openMenu` (uitklapmenu), `pickFrom`/`pickProject` (keuzelijst met zoeken, projecten per klant), periodekiezer `rangeHtml`/`bindRange` (`RANGES`, `rangeOf`, `shiftRange`), grafieken `barChart` (ook gestapeld via `segs`) en `donut`, `buckets` (dag/week/maand), `groupKeys`/`groupRows`/`groupText`.
+- Time Tracker: balk met modus timer (start/stop) of manueel (start–einde als 24-uurs tekstvelden via `parseHM`, datum, duur via `parseDur`). Daaronder per week (weektotaal) en per dag (dagtotaal) de eigen registraties; gelijke registraties op een dag gegroepeerd met teller (uitklappen). Inline bewerken: omschrijving, project, tags, €, start/einde, datum; ⋮ = bewerken/dupliceren/verwijderen.
+- Calendar: Week/Dag, zoom (−/+), collega kiezen (admin), periodekiezer; klik leeg vak = toevoegen, klik blok = bewerken.
+- Dashboard: groeperen op project/klant/tag/(medewerker), Enkel ik/Team (admin), periode; totale tijd, topproject, topklant, gestapelde staven per dag, ring + lijst met %, top 10 activiteiten.
+- Reports: tabbladen Samenvatting (groeperen op 2 niveaus, uitklapbaar, ring), Gedetailleerd, Wekelijks; filterbalk Team/Klant/Project/Tag/Omschrijving; periodekiezer; Exporteren → PDF (jsPDF + autotable via jsdelivr, pas geladen bij eerste export) of CSV (`;`, BOM). Bedrag enkel getoond als er tarieven zijn.
 - Projects: zoeken, filter per klant en status, kleur, archiveren. Op vraag van Seppe géén tarief, budget of type (factureerbaar) meer in de UI (kolommen bestaan nog in de database). Clients en Tags hebben elk een eigen pagina (iedereen mag tags maken, admins wijzigen/verwijderen).
 - Importeren (admin): Clockify-CSV (gedetailleerd rapport en/of projectlijst) → klanten, projecten, tags, registraties. Projectexport levert ook budget (Estimated), tarief en factureerbaar, en het Clockify-totaal (Tracked) waarmee de importpagina controleert of alle registraties mee zijn. Samenvattend rapport = enkel projecten. Medewerkers koppelen op e-mail/naam; dubbels vermeden via `time_entries.source_ref` (unieke index, upsert met ignoreDuplicates).
-- Team: weekuren vs doel, live status, rollen, tarieven, deactiveren, uitnodigingslink.
+- Team: filter status/rol/zoeken, tabel naam/e-mail/uurtarief (Wijzig)/rol (klikbaar voor admin)/⋮ (bewerken, rapport, (de)activeren), "aan het werk"-label, collega's zonder account (uit `unclaimed_imports`) als "Nog geen account". "Nieuw lid toevoegen" = uitnodigingslink.
 
 ## Datamodel & rechten
 - Tabellen: `profiles` (role admin|member, hourly_rate, weekly_target, active), `clients`, `projects`, `time_entries` (end_at null = lopende timer; max 1 per gebruiker; `tag_ids uuid[]`, `source_ref`), `tags` (v2).

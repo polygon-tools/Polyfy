@@ -22,11 +22,12 @@ const S = {
   session: null, me: null, recovery: IS_RECOVERY_LINK,
   profiles: [], projects: [], clients: [], tags: [], tagsReady: false, running: null,
   view: 'dashboard',
-  cal: { week: null, user: null },
-  rep: { preset: 'week', from: '', to: '', user: '', project: '', client: '', tag: '', group: 'project', tab: 'summary' },
+  cal: { from: null, user: null, mode: 'week', zoom: 48 },
+  rep: { from: null, to: null, user: '', project: '', client: '', tag: '', desc: '', g1: 'project', g2: 'description', tab: 'summary', open: new Set() },
+  team: { status: 'active', role: '', q: '' },
   proj: { search: '', status: 'active', client: '' },
-  trk: { weeks: 2 },
-  ts: { week: null, user: null, extra: [] },
+  trk: { weeks: 2, open: new Set() },
+  dash: { from: null, to: null, group: 'project', who: 'me' },
   imp: null
 };
 
@@ -58,6 +59,13 @@ const addDays = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); r
 const startOfWeek = d => { const x = startOfDay(d); const wd = (x.getDay() + 6) % 7; return addDays(x, -wd); };
 const startOfMonth = d => new Date(d.getFullYear(), d.getMonth(), 1);
 const ymd = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+// "15:15", "1515", "915" of "9" -> [uur, minuut] (24-uurs); ongeldig = null
+function parseHM(v) {
+  const t = String(v).trim().replace(/[.h]/, ':'), m = t.match(/^(\d{1,2})(?::?(\d{2}))?$/);
+  if (!m) return null;
+  const h = Number(m[1]), mi = Number(m[2] || 0);
+  return h < 24 && mi < 60 ? [h, mi] : null;
+}
 const parseYmd = s => { const [y, m, d] = s.split('-').map(Number); return new Date(y, m - 1, d); };
 const hm = d => `${pad(d.getHours())}:${pad(d.getMinutes())}`;
 const sameDay = (a, b) => ymd(a) === ymd(b);
@@ -79,6 +87,7 @@ function weekNumber(d) {
 
 // Duurweergave: 1:05:09 (timer), 7:30 (uren:minuten), 7,5 (decimaal)
 const fmtClock = sec => { sec = Math.max(0, Math.floor(sec)); return `${Math.floor(sec / 3600)}:${pad(Math.floor(sec / 60) % 60)}:${pad(sec % 60)}`; };
+const fmtHMS = sec => { sec = Math.max(0, Math.round(sec)); return `${pad(Math.floor(sec / 3600))}:${pad(Math.floor(sec / 60) % 60)}:${pad(sec % 60)}`; };
 const fmtHM = sec => { const m = Math.round(Math.max(0, sec) / 60); return `${Math.floor(m / 60)}:${pad(m % 60)}`; };
 const fmtDec = sec => (sec / 3600).toLocaleString('nl-BE', { maximumFractionDigits: 2 });
 const fmtMoney = v => v.toLocaleString('nl-BE', { style: 'currency', currency: CFG.CURRENCY || 'EUR' });
@@ -186,7 +195,9 @@ const I = {
   menu: '<path d="M4 6h16M4 12h16M4 18h16"/>', dl: '<path d="M12 4v11M7 10l5 5 5-5M5 20h14"/>',
   logout: '<path d="M15 4h4v16h-4M10 8l-4 4 4 4M6 12h10"/>',
   up: '<path d="M12 20V9M7 14l5-5 5 5M5 4h14"/>',
-  sheet: '<rect x="3" y="4" width="18" height="17" rx="2"/><path d="M3 10h18M9 10v11M15 10v11M8 2v4M16 2v4"/>',
+  list: '<path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>',
+  dots: '<circle cx="12" cy="5" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="12" cy="19" r="1.2"/>',
+  down: '<path d="M6 9l6 6 6-6"/>',
   clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
   client: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="10" r="3"/><path d="M6.5 18.5a6.5 6.5 0 0 1 11 0"/>',
   pdf: '<path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6M9 14h6M9 18h4"/>',
@@ -322,7 +333,7 @@ function renderAuth(mode, msg = null) {
 // =====================================================================
 // Paginanamen zoals in Clockify; 4e veld = sectietitel die erboven komt
 const NAV = [
-  ['timesheet', 'Timesheet', 'sheet'], ['tracker', 'Time Tracker', 'clock'], ['calendar', 'Calendar', 'cal'],
+  ['tracker', 'Time Tracker', 'clock'], ['calendar', 'Calendar', 'cal'],
   ['dashboard', 'Dashboard', 'dash', 'Analyze'], ['reports', 'Reports', 'rep'],
   ['projects', 'Projects', 'proj', 'Manage'], ['team', 'Team', 'team'], ['clients', 'Clients', 'client'], ['tags', 'Tags', 'tag'], ['import', 'Import', 'up']
 ];
@@ -366,7 +377,7 @@ function route() {
 }
 function refreshPage() {
   const page = $('#page'); if (!page) return;
-  ({ timesheet: renderTimesheet, tracker: renderTracker, calendar: renderCalendar, dashboard: renderDashboard, reports: renderReports,
+  ({ tracker: renderTracker, calendar: renderCalendar, dashboard: renderDashboard, reports: renderReports,
      projects: renderProjects, team: renderTeam, clients: renderClients, tags: renderTags, import: renderImport })[S.view](page)
     .catch(fail);
 }
@@ -374,36 +385,49 @@ function refreshPage() {
 // ---------- Timer ----------
 let timerTick = null;
 let draft = { description: '', project_id: '', billable: true, tag_ids: [] };
+// Time Tracker-modus zoals in Clockify: 'timer' (start/stop) of 'manual' (start- en eindtijd ingeven)
+let trkMode = (() => { try { return localStorage.getItem('polyfy-mode') || 'timer'; } catch (_) { return 'timer'; } })();
+let manual = null;
 
 // Lopende timer: klok op de Time Tracker-pagina, in het menu en in de paginatitel
 function startTick() {
   clearInterval(timerTick);
   const upd = () => {
-    const r = S.running, t = r ? fmtClock(entrySec(r)) : '';
-    const c = $('#t-clock'); if (c) c.textContent = t || '0:00:00';
-    const n = $('#nav-clock'); if (n) n.textContent = t;
-    document.title = r ? `${t} · Polyfy` : `${NAV.find(x => x[0] === S.view)?.[1] || 'Polyfy'} · Polyfy`;
+    const r = S.running;
+    const c = $('#t-clock'); if (c) c.textContent = fmtHMS(r ? entrySec(r) : 0);
+    const n = $('#nav-clock'); if (n) n.textContent = r ? fmtClock(entrySec(r)) : '';
+    document.title = r ? `${fmtClock(entrySec(r))} · Polyfy` : `${NAV.find(x => x[0] === S.view)?.[1] || 'Polyfy'} · Polyfy`;
   };
   upd();
   if (S.running) timerTick = setInterval(upd, 1000);
 }
 
+// Knoptekst voor een project: gekleurde naam + klant, of "+ Project"
+function projBtnHtml(pid) {
+  const p = byId(S.projects, pid);
+  return p ? `<span class="dot" style="background:${esc(p.color)}"></span><span class="pn" style="color:${esc(p.color)}">${esc(p.name)}</span>${clientOf(p) ? `<span class="muted"> - ${esc(clientOf(p).name)}</span>` : ''}`
+    : `${icon('plus')}<span>Project</span>`;
+}
+
 function renderTimer() {
   startTick();
   const bar = $('#timerbar'); if (!bar) return;
-  const r = S.running;
-  const cur = r || draft;
+  const r = S.running, cur = r || draft, man = trkMode === 'manual' && !r;
+  if (man && !manual) { const now = new Date(); manual = { date: ymd(now), start: hm(now), end: hm(now) }; }
   bar.classList.toggle('running', !!r);
   bar.innerHTML = `
-    <input class="desc" id="t-desc" placeholder="Waar werk je aan?" value="${esc(cur.description)}" aria-label="Omschrijving">
-    <select id="t-proj" aria-label="Project" style="max-width:240px">${projectOptions(cur.project_id || '')}</select>
+    <input class="desc" id="t-desc" placeholder="Waar heb je aan gewerkt?" value="${esc(cur.description)}" aria-label="Omschrijving">
+    <button class="btn ghost projbtn" id="t-proj" title="Project">${projBtnHtml(cur.project_id)}</button>
     ${S.tagsReady ? `<button class="btn ghost tagbtn" id="t-tags" title="Tags">${tagBtnHtml(cur.tag_ids)}</button>` : ''}
     <button class="billable-toggle ${cur.billable ? 'on' : ''}" id="t-bill" title="Factureerbaar" aria-pressed="${!!cur.billable}">€</button>
-    <span class="clock num" id="t-clock">${r ? fmtClock(entrySec(r)) : '0:00:00'}</span>
-    <button class="btn ${r ? 'stop' : 'start'}" id="t-go">${r ? 'Stop' : 'Start'}</button>
-    <button class="btn ghost" id="t-manual" title="Registratie manueel toevoegen">${icon('plus')}<span class="hide-sm">Manueel</span></button>`;
+    ${man ? `<span class="tb-times"><input class="hm num" id="t-start" value="${manual.start}" aria-label="Start" inputmode="numeric"><span class="muted">–</span><input class="hm num" id="t-end" value="${manual.end}" aria-label="Einde" inputmode="numeric"><input type="date" id="t-date" value="${manual.date}" aria-label="Datum"></span>
+        <input class="clock num tb-dur" id="t-dur" aria-label="Duur">
+        <button class="btn start" id="t-add">Toevoegen</button>`
+      : `<span class="clock num" id="t-clock">${fmtHMS(r ? entrySec(r) : 0)}</span>
+        <button class="btn ${r ? 'stop' : 'start'}" id="t-go">${r ? 'Stop' : 'Start'}</button>`}
+    <div class="modes"><button class="${man ? '' : 'on'}" data-mode="timer" title="Timer" aria-label="Timer">${icon('clock')}</button><button class="${man ? 'on' : ''}" data-mode="manual" title="Manueel" aria-label="Manueel">${icon('list')}</button></div>`;
 
-  const desc = $('#t-desc'), proj = $('#t-proj'), bill = $('#t-bill');
+  const desc = $('#t-desc'), bill = $('#t-bill');
   const saveRunning = async patch => {
     if (!S.running) { Object.assign(draft, patch); return; }
     const { data, error } = await sb.from('time_entries').update(patch).eq('id', S.running.id).select().single();
@@ -411,34 +435,70 @@ function renderTimer() {
     S.running = data;
   };
   desc.onchange = () => saveRunning({ description: desc.value.trim() });
-  desc.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); if (!S.running) startTimer(); else desc.blur(); } };
-  proj.onchange = () => {
-    const p = byId(S.projects, proj.value);
-    const patch = { project_id: proj.value || null };
+  desc.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); if (man) addManual(); else if (!S.running) startTimer(); else desc.blur(); } };
+  $('#t-proj').onclick = () => pickProject($('#t-proj'), cur.project_id, pid => {
+    const p = byId(S.projects, pid), patch = { project_id: pid };
     if (p) { patch.billable = p.billable; bill.classList.toggle('on', p.billable); }
+    $('#t-proj').innerHTML = projBtnHtml(pid); cur.project_id = pid;
     saveRunning(patch);
-  };
+  });
   bill.onclick = () => { const on = !bill.classList.contains('on'); bill.classList.toggle('on', on); saveRunning({ billable: on }); };
   if (S.tagsReady) bindTagPicker($('#t-tags'), () => (S.running || draft).tag_ids || [], ids => saveRunning({ tag_ids: ids }));
-  $('#t-go').onclick = () => S.running ? stopTimer() : startTimer();
-  $('#t-manual').onclick = () => openEntryModal(null);
+  $$('.modes [data-mode]', bar).forEach(b => b.onclick = () => {
+    trkMode = b.dataset.mode; try { localStorage.setItem('polyfy-mode', trkMode); } catch (_) {}
+    draft.description = desc.value; renderTimer();
+  });
+  if (!man) { $('#t-go').onclick = () => S.running ? stopTimer() : startTimer(); return; }
+
+  // Manueel: duur volgt uit start/einde; een duur typen verschuift het einde
+  const times = () => {
+    const d = parseYmd($('#t-date').value || ymd(new Date()));
+    const at = v => { const [h, m] = parseHM(v) || [0, 0]; const x = new Date(d); x.setHours(h, m, 0, 0); return x; };
+    const s = at($('#t-start').value); let e = at($('#t-end').value);
+    if (e < s) e = addDays(e, 1);
+    return { s, e };
+  };
+  const showDur = () => { const { s, e } = times(); $('#t-dur').value = fmtHMS((e - s) / 1000); };
+  const keep = () => Object.assign(manual, { date: $('#t-date').value, start: $('#t-start').value, end: $('#t-end').value });
+  $$('#t-start,#t-end,#t-date', bar).forEach(i => i.addEventListener('change', () => {
+    if (i.classList.contains('hm')) { const t = parseHM(i.value); i.value = t ? `${pad(t[0])}:${pad(t[1])}` : manual[i.id === 't-start' ? 'start' : 'end']; }
+    keep(); showDur();
+  }));
+  $$('.hm', bar).forEach(i => { i.onfocus = () => i.select(); i.onkeydown = e => { if (e.key === 'Enter') i.blur(); }; });
+  $('#t-dur').onchange = () => {
+    const sec = parseDur($('#t-dur').value);
+    if (sec == null || sec > 24 * 3600) { toast('Geef een duur in zoals 1:30 of 1,5 (max. 24 uur).', true); return showDur(); }
+    const { s } = times(); $('#t-end').value = hm(new Date(s.getTime() + sec * 1000)); keep(); showDur();
+  };
+  $('#t-dur').onkeydown = e => { if (e.key === 'Enter') e.target.blur(); };
+  $('#t-add').onclick = addManual;
+  showDur();
+
+  async function addManual() {
+    const { s, e } = times();
+    if (e - s < 60000) return toast('Geef een start- en eindtijd in.', true);
+    const { error } = await sb.from('time_entries').insert({
+      user_id: S.me.id, description: desc.value.trim(), project_id: cur.project_id || null, billable: bill.classList.contains('on'),
+      start_at: s.toISOString(), end_at: e.toISOString(), ...tagField(draft.tag_ids)
+    });
+    if (error) return fail(error);
+    draft = { description: '', project_id: '', billable: true, tag_ids: [] };
+    manual = { date: manual.date, start: hm(e), end: hm(e) };
+    toast('Registratie toegevoegd'); renderTimer(); refreshPage();
+  }
 }
 
 async function startTimer(fromEntry = null) {
   try {
     if (S.running) await stopTimer(true);
-    const src = fromEntry || {
-      description: $('#t-desc')?.value.trim() || '',
-      project_id: $('#t-proj')?.value || null,
-      billable: $('#t-bill')?.classList.contains('on') ?? true,
-      tag_ids: draft.tag_ids
-    };
+    const src = fromEntry || { description: $('#t-desc')?.value.trim() || '', project_id: draft.project_id || null, billable: $('#t-bill')?.classList.contains('on') ?? true, tag_ids: draft.tag_ids };
     const { data, error } = await sb.from('time_entries').insert({
       user_id: S.me.id, description: src.description || '', project_id: src.project_id || null,
       billable: !!src.billable, start_at: new Date().toISOString(), ...tagField(src.tag_ids)
     }).select().single();
     if (error) throw error;
     S.running = data; draft = { description: '', project_id: '', billable: true, tag_ids: [] };
+    if (trkMode === 'manual') { trkMode = 'timer'; try { localStorage.setItem('polyfy-mode', 'timer'); } catch (_) {} }
     renderTimer(); refreshPage();
   } catch (err) { fail(err); }
 }
@@ -452,6 +512,91 @@ async function stopTimer(silent = false) {
   if (error) return fail(error);
   S.running = null;
   if (!silent) { renderTimer(); refreshPage(); }
+}
+
+// ---------- Uitklapmenu (één tegelijk; voor keuzelijsten, export, ⋮) ----------
+function closeMenu() { $('#menu')?.remove(); }
+function openMenu(anchor, html, bind, cls = '') {
+  if ($('#menu')?.anchor === anchor) return closeMenu();
+  closeMenu(); closeTagPop();
+  const m = document.createElement('div');
+  m.className = 'menu ' + cls; m.id = 'menu'; m.anchor = anchor; m.innerHTML = html;
+  document.body.appendChild(m);
+  const r = anchor.getBoundingClientRect();
+  m.style.left = Math.max(8, Math.min(r.left, innerWidth - m.offsetWidth - 8)) + 'px';
+  m.style.top = (r.bottom + m.offsetHeight + 8 > innerHeight ? Math.max(8, r.top - m.offsetHeight - 4) : r.bottom + 4) + 'px';
+  bind(m);
+  $('input:not([type=date])', m)?.focus();
+  return m;
+}
+document.addEventListener('mousedown', e => { const m = $('#menu'); if (m && !m.contains(e.target) && !m.anchor.contains(e.target)) closeMenu(); });
+addEventListener('scroll', e => { if (!e.target.closest?.('#menu')) closeMenu(); }, true);
+
+// Keuzelijst met zoekveld. items: [{ id, label, dot?, group? }]; id '' = "alle"/"geen".
+function pickFrom(anchor, items, current, onPick, { placeholder = 'Zoeken…', emptyLabel = null, cls = '' } = {}) {
+  openMenu(anchor, `<input placeholder="${esc(placeholder)}" aria-label="Zoeken"><div class="list"></div>`, m => {
+    const inp = $('input', m), list = $('.list', m);
+    const draw = () => {
+      const q = inp.value.trim().toLowerCase();
+      const hits = items.filter(x => !q || (x.label + ' ' + (x.group || '')).toLowerCase().includes(q));
+      let html = emptyLabel && !q ? `<button class="mi ${!current ? 'on' : ''}" data-v="">${esc(emptyLabel)}</button>` : '', grp = null;
+      for (const x of hits) {
+        if (x.group !== undefined && x.group !== grp) { grp = x.group; html += `<div class="mh">${esc(grp)}</div>`; }
+        html += `<button class="mi ${x.id === current ? 'on' : ''}" data-v="${esc(x.id)}">${x.dot ? `<span class="dot" style="background:${esc(x.dot)}"></span>` : ''}${esc(x.label)}${x.extra ? ` <span class="muted">${esc(x.extra)}</span>` : ''}</button>`;
+      }
+      list.innerHTML = html || '<div class="muted small" style="padding:6px 8px">Niets gevonden.</div>';
+      $$('[data-v]', list).forEach(b => b.onclick = () => { closeMenu(); onPick(b.dataset.v || null); });
+    };
+    inp.oninput = draw; draw();
+  }, cls);
+}
+// Project kiezen, gegroepeerd per klant (zoals Clockify)
+function pickProject(anchor, current, onPick, { emptyLabel = 'Geen project', includeArchived = false } = {}) {
+  const items = S.projects.filter(p => includeArchived || !p.archived || p.id === current)
+    .map(p => ({ id: p.id, label: p.name, dot: p.color, group: clientOf(p)?.name || 'Zonder klant', extra: p.archived ? '(gearchiveerd)' : '' }))
+    .sort((a, b) => a.group.localeCompare(b.group) || a.label.localeCompare(b.label));
+  pickFrom(anchor, items, current, onPick, { placeholder: 'Zoek project of klant…', emptyLabel, cls: 'wide' });
+}
+
+// ---------- Periodekiezer (zoals "This week" met vorige/volgende) ----------
+const RANGES = [['today', 'Vandaag'], ['yesterday', 'Gisteren'], ['week', 'Deze week'], ['lastweek', 'Vorige week'], ['month', 'Deze maand'], ['lastmonth', 'Vorige maand'], ['year', 'Dit jaar'], ['lastyear', 'Vorig jaar']];
+// [van, tot (exclusief)]
+function rangeOf(k) {
+  const now = new Date(), t = startOfDay(now), wk = startOfWeek(now), mo = startOfMonth(now), y = now.getFullYear(), m = now.getMonth();
+  return { today: [t, addDays(t, 1)], yesterday: [addDays(t, -1), t], week: [wk, addDays(wk, 7)], lastweek: [addDays(wk, -7), wk],
+    month: [mo, new Date(y, m + 1, 1)], lastmonth: [new Date(y, m - 1, 1), mo], year: [new Date(y, 0, 1), new Date(y + 1, 0, 1)], lastyear: [new Date(y - 1, 0, 1), new Date(y, 0, 1)] }[k];
+}
+function rangeLabel(a, b) {
+  for (const [k, l] of RANGES) { const [x, y] = rangeOf(k); if (+x === +a && +y === +b) return l; }
+  const last = addDays(b, -1);
+  return sameDay(a, last) ? fmtDate(a, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })
+    : `${fmtDate(a, { day: 'numeric', month: 'short' })} – ${fmtDate(last, { day: 'numeric', month: 'short', year: 'numeric' })}`;
+}
+// Hele maanden/jaren verschuiven per maand, anders per lengte van de periode
+function shiftRange(a, b, dir) {
+  if (a.getDate() === 1 && b.getDate() === 1) {
+    const n = (b.getFullYear() - a.getFullYear()) * 12 + b.getMonth() - a.getMonth();
+    return [new Date(a.getFullYear(), a.getMonth() + dir * n, 1), new Date(b.getFullYear(), b.getMonth() + dir * n, 1)];
+  }
+  const n = Math.round((b - a) / DAY_MS);
+  return [addDays(a, dir * n), addDays(b, dir * n)];
+}
+const rangeHtml = (a, b) => `<div class="range"><button class="btn rlbl" data-r="pick">${icon('cal')}<span>${esc(rangeLabel(a, b))}</span></button><button class="btn icon" data-r="-1" aria-label="Vorige periode">${icon('left')}</button><button class="btn icon" data-r="1" aria-label="Volgende periode">${icon('right')}</button></div>`;
+function bindRange(root, a, b, set) {
+  $$('.range [data-r]', root).forEach(btn => btn.onclick = () => {
+    if (btn.dataset.r !== 'pick') return set(...shiftRange(a, b, Number(btn.dataset.r)));
+    openMenu(btn, `${RANGES.map(([k, l]) => `<button class="mi" data-k="${k}">${l}</button>`).join('')}
+      <div class="mh">Aangepast</div>
+      <div class="row" style="padding:2px 8px;flex-wrap:nowrap"><input type="date" id="rg-a" value="${ymd(a)}" aria-label="Van"><input type="date" id="rg-b" value="${ymd(addDays(b, -1))}" aria-label="Tot"></div>
+      <div style="padding:6px 8px"><button class="btn primary" id="rg-ok" style="width:100%">Toepassen</button></div>`, m => {
+      $$('[data-k]', m).forEach(x => x.onclick = () => { closeMenu(); set(...rangeOf(x.dataset.k)); });
+      $('#rg-ok', m).onclick = () => {
+        const p = $('#rg-a', m).value, q = $('#rg-b', m).value; if (!p || !q) return;
+        const [x, y] = [parseYmd(p), parseYmd(q)].sort((u, v) => u - v);
+        closeMenu(); set(x, addDays(y, 1));
+      };
+    });
+  });
 }
 
 // ---------- Tag-kiezer (knop + uitklapmenu met zoeken/aanmaken) ----------
@@ -469,7 +614,7 @@ function bindTagPicker(btn, getIds, onChange) {
 }
 function closeTagPop() { $('#tagpop')?.remove(); }
 function openTagPop(anchor, ids, onChange) {
-  closeTagPop();
+  closeTagPop(); closeMenu();
   let sel = [...ids];
   const pop = document.createElement('div');
   pop.className = 'tagpop'; pop.id = 'tagpop'; pop.anchor = anchor;
@@ -525,8 +670,8 @@ function openModal(title, bodyHtml, footHtml) {
   const first = $('input,select,textarea', bg); if (first) setTimeout(() => first.focus(), 30);
   return bg;
 }
-function closeModal() { closeTagPop(); $('#modal')?.remove(); }
-document.addEventListener('keydown', e => { if (e.key !== 'Escape') return; if ($('#tagpop')) closeTagPop(); else closeModal(); });
+function closeModal() { closeTagPop(); closeMenu(); $('#modal')?.remove(); }
+document.addEventListener('keydown', e => { if (e.key !== 'Escape') return; if ($('#menu')) closeMenu(); else if ($('#tagpop')) closeTagPop(); else closeModal(); });
 
 // Registratie toevoegen of bewerken. `entry` = null voor nieuw; `preset` vult velden voor.
 function openEntryModal(entry, preset = {}) {
@@ -660,7 +805,11 @@ function barChart(el, data, { height = 220, showValues = true } = {}) {
       const cx = padL + band * i + band / 2;
       const h = max ? (d.value / max) * ih : 0;
       const x = cx - bw / 2, y = padT + ih - h, r = Math.min(4, h, bw / 2);
-      if (h > 0.5) s += `<path class="bar" fill="var(--bar)" d="M${x},${padT + ih} V${y + r} Q${x},${y} ${x + r},${y} H${x + bw - r} Q${x + bw},${y} ${x + bw},${y + r} V${padT + ih} Z"/>`;
+      if (d.segs && h > 0.5) {
+        // Gestapeld: segmenten van onder naar boven, met een dun wit randje ertussen
+        let yb = padT + ih;
+        for (const g of d.segs) { const sh = max ? g.value / max * ih : 0; if (sh < 0.3) continue; s += `<rect x="${x}" y="${yb - sh}" width="${bw}" height="${sh}" fill="${esc(g.color)}" stroke="var(--surface)" stroke-width="1"/>`; yb -= sh; }
+      } else if (h > 0.5) s += `<path class="bar" fill="var(--bar)" d="M${x},${padT + ih} V${y + r} Q${x},${y} ${x + r},${y} H${x + bw - r} Q${x + bw},${y} ${x + bw},${y + r} V${padT + ih} Z"/>`;
       if (showValues && d.value > 0 && data.length <= 14) s += `<text class="barval" x="${cx}" y="${y - 5}" text-anchor="middle">${esc(d.valueLabel ?? fmtHM(d.value * 3600))}</text>`;
       if (i % labelEvery === 0) s += `<g class="axis"><text x="${cx}" y="${H - 8}" text-anchor="middle">${esc(d.label)}</text></g>`;
       s += `<rect class="hit" x="${padL + band * i}" y="${padT}" width="${band}" height="${ih}" data-tip="${esc(d.tip)}"/>`;
@@ -672,278 +821,268 @@ function barChart(el, data, { height = 220, showValues = true } = {}) {
   ro.observe(el);
 }
 
-// Horizontale balken per project/groep, met label en waarde (identiteit nooit enkel via kleur)
-function hbars(rows, total) {
-  if (!rows.length) return '<div class="empty">Nog geen uren in deze periode.</div>';
-  const max = Math.max(...rows.map(r => r.sec));
-  return `<div class="hbars">${rows.map(r => `
-    <div class="hbar" data-tip="<b>${esc(r.name)}</b><br>${fmtHM(r.sec)} u · ${total ? Math.round(r.sec / total * 100) : 0}%">
-      <div class="top"><span class="proj"><span class="dot" style="background:${esc(r.color)}"></span>${esc(r.name)}</span><span class="num"><b>${fmtHM(r.sec)}</b> <span class="muted">${total ? Math.round(r.sec / total * 100) : 0}%</span></span></div>
-      <div class="track"><div class="fill" style="width:${max ? r.sec / max * 100 : 0}%;background:${esc(r.color)}"></div></div>
-    </div>`).join('')}</div>`;
+// Ringgrafiek. rows: [{ name, sec, color }]
+function donut(rows, total, size = 220) {
+  const R = size / 2 - 18, C = 2 * Math.PI * R, w = 34;
+  let off = 0;
+  const segs = total ? rows.filter(r => r.sec > 0).map(r => {
+    const len = r.sec / total * C, el = `<circle r="${R}" cx="${size / 2}" cy="${size / 2}" fill="none" stroke="${esc(r.color)}" stroke-width="${w}"
+      stroke-dasharray="${len} ${C - len}" stroke-dashoffset="${-off}" transform="rotate(-90 ${size / 2} ${size / 2})" data-tip="<b>${esc(r.name)}</b><br>${fmtHMS(r.sec)} · ${Math.round(r.sec / total * 1000) / 10}%"/>`;
+    off += len; return el;
+  }).join('') : '';
+  return `<svg class="donut" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" role="img" aria-label="Verdeling">
+    <circle r="${R}" cx="${size / 2}" cy="${size / 2}" fill="none" stroke="var(--grid)" stroke-width="${w}"/>${segs}
+    <text x="50%" y="50%" text-anchor="middle" dominant-baseline="central" class="donut-t">${fmtHMS(total)}</text></svg>`;
 }
 
-// Registraties per dag gegroepeerd (dashboard)
-function entryList(entries, { showUser = false } = {}) {
-  if (!entries.length) return '<div class="empty">Nog geen registraties. Start de timer of voeg manueel uren toe.</div>';
-  const groups = new Map();
-  for (const e of entries) {
-    const k = ymd(entryStart(e));
-    if (!groups.has(k)) groups.set(k, []);
-    groups.get(k).push(e);
-  }
-  return [...groups].map(([k, list]) => `
-    <div class="day-group">
-      <div class="day-head"><span>${esc(fmtDayLong(parseYmd(k)))}</span><span class="num">${fmtHM(list.reduce((a, e) => a + entrySec(e), 0))}</span></div>
-      ${list.map(e => `
-        <div class="entry" data-id="${e.id}">
-          <div class="desc"><div>${e.description ? esc(e.description) : '<span class="muted">(geen omschrijving)</span>'}${e.billable ? ' <span class="muted" title="Factureerbaar">€</span>' : ''}</div>
-            <div class="small">${projLabel(projectOf(e))}${tagChips(e.tag_ids)}${showUser ? ` <span class="muted">· ${esc(profileOf(e.user_id)?.full_name || '')}</span>` : ''}</div></div>
-          <div class="times num">${hm(entryStart(e))} – ${e.end_at ? hm(entryEnd(e)) : 'nu'}</div>
-          <div class="dur num">${e.end_at ? fmtHM(entrySec(e)) : '<span class="tag live">loopt</span>'}</div>
-          <div class="acts">
-            ${e.user_id === S.me.id ? `<button class="btn icon ghost" data-act="cont" title="Opnieuw starten" aria-label="Opnieuw starten">${icon('play')}</button>` : ''}
-            <button class="btn icon ghost" data-act="edit" title="Bewerken" aria-label="Bewerken">${icon('edit')}</button>
-            <button class="btn icon ghost" data-act="del" title="Verwijderen" aria-label="Verwijderen">${icon('trash')}</button>
-          </div>
-        </div>`).join('')}
-    </div>`).join('');
-}
-function bindEntryList(root, entries) {
-  $$('.entry', root).forEach(row => {
-    const e = entries.find(x => x.id === row.dataset.id);
-    $$('[data-act]', row).forEach(b => b.onclick = () => {
-      if (b.dataset.act === 'cont') startTimer(e);
-      if (b.dataset.act === 'edit') openEntryModal(e);
-      if (b.dataset.act === 'del') deleteEntry(e);
-    });
-  });
+// Kleur per groep: projecten hun eigen kleur, andere groepen uit de vaste lijst
+const groupColor = (group, k, i) => group === 'project' ? (byId(S.projects, k)?.color || NO_PROJECT_COLOR) : k ? PROJECT_COLORS[i % PROJECT_COLORS.length] : NO_PROJECT_COLOR;
+
+// Emmers voor grafieken: per dag (≤ 31 dagen), per week (≤ 120) of per maand
+function buckets(from, to) {
+  const days = Math.round((to - from) / DAY_MS), out = [];
+  if (days <= 31) for (let i = 0; i < days; i++) { const d = addDays(from, i); out.push({ a: d, b: addDays(d, 1), label: days <= 7 ? fmtDate(d, { weekday: 'short', day: 'numeric', month: 'short' }) : String(d.getDate()), tip: fmtDate(d, { weekday: 'long', day: 'numeric', month: 'long' }) }); }
+  else if (days <= 120) for (let d = startOfWeek(from); d < to; d = addDays(d, 7)) out.push({ a: new Date(Math.max(d, from)), b: new Date(Math.min(addDays(d, 7), to)), label: `W${weekNumber(d)}`, tip: `Week ${weekNumber(d)} (${fmtDate(d, { day: 'numeric', month: 'short' })})` });
+  else for (let d = startOfMonth(from); d < to; d = new Date(d.getFullYear(), d.getMonth() + 1, 1)) out.push({ a: new Date(Math.max(d, from)), b: new Date(Math.min(new Date(d.getFullYear(), d.getMonth() + 1, 1), to)), label: fmtDate(d, { month: 'short' }), tip: fmtDate(d, { month: 'long', year: 'numeric' }) });
+  return out;
 }
 
 // =====================================================================
-// Time Tracker (timer + eigen registraties per week)
+// Time Tracker (zoals Clockify: timer/manueel bovenaan, registraties per week en dag)
 // =====================================================================
+// "7:30", "7:30:00", "7,5", "7.5" of "7" -> seconden; leeg = 0; ongeldig = null
+function parseDur(v) {
+  v = String(v).trim();
+  if (!v) return 0;
+  let m = v.match(/^(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?$/);
+  if (m) return Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3] || 0);
+  m = v.match(/^\d+([.,]\d+)?$/);
+  return m ? Math.round(Number(v.replace(',', '.')) * 60) * 60 : null;
+}
+
 async function renderTracker(page) {
   const today = startOfDay(new Date()), wk0 = startOfWeek(today);
   const weeks = S.trk.weeks, from = addDays(wk0, -7 * (weeks - 1));
   const entries = await fetchEntries({ from, to: addDays(today, 1), userId: S.me.id });
   if (S.view !== 'tracker') return;
+  // Gelijke registraties op dezelfde dag worden gegroepeerd (zoals Clockify)
+  const gkey = e => [ymd(entryStart(e)), e.description.trim().toLowerCase(), e.project_id || '', [...(e.tag_ids || [])].sort().join(','), e.billable].join('|');
+  const groups = new Map();
+  for (const e of [...entries].sort((x, y) => entryStart(y) - entryStart(x))) {
+    const k = gkey(e); if (!groups.has(k)) groups.set(k, { key: k, items: [] }); groups.get(k).items.push(e);
+  }
   const blocks = [];
   for (let i = 0; i < weeks; i++) {
     const a = addDays(wk0, -7 * i), b = addDays(a, 7);
-    const list = entries.filter(e => entryStart(e) >= a && entryStart(e) < b);
-    if (!list.length) continue;
-    const label = i === 0 ? 'Deze week' : i === 1 ? 'Vorige week' : `${fmtDate(a, { day: 'numeric', month: 'short' })} – ${fmtDate(addDays(a, 6), { day: 'numeric', month: 'short', year: 'numeric' })}`;
-    blocks.push(`<div class="card"><div class="card-head"><h2>${esc(label)}</h2><span class="muted small">Week ${weekNumber(a)} · totaal <b class="num">${fmtHM(list.reduce((t, e) => t + entrySec(e), 0))}</b></span></div><div data-wk="${i}">${entryList(list)}</div></div>`);
+    const wkEntries = entries.filter(e => entryStart(e) >= a && entryStart(e) < b);
+    if (!wkEntries.length) continue;
+    const label = i === 0 ? 'Deze week' : i === 1 ? 'Vorige week' : `${fmtDate(a, { day: 'numeric', month: 'short' })} – ${fmtDate(addDays(a, 6), { day: 'numeric', month: 'short' })}`;
+    let html = `<div class="wk-head"><span>${esc(label)}</span><span class="muted small">Weektotaal: <b class="wk-tot num">${fmtHMS(wkEntries.reduce((t, e) => t + entrySec(e), 0))}</b></span></div>`;
+    for (let d = 6; d >= 0; d--) {
+      const day = addDays(a, d), dayGroups = [...groups.values()].filter(g => sameDay(entryStart(g.items[0]), day));
+      if (!dayGroups.length) continue;
+      const dayTot = dayGroups.reduce((t, g) => t + g.items.reduce((u, e) => u + entrySec(e), 0), 0);
+      html += `<div class="card tday"><div class="tday-head"><span>${esc(fmtDayLong(day))}</span><span class="muted small">Totaal: <b class="num">${fmtHMS(dayTot)}</b></span></div>
+        ${dayGroups.map(g => trackRow(g) + (g.items.length > 1 && S.trk.open.has(g.key) ? g.items.map(e => trackRow({ key: g.key, items: [e] }, true)).join('') : '')).join('')}</div>`;
+    }
+    blocks.push(html);
   }
   page.innerHTML = `
-    <div class="page-head"><h1>Time Tracker</h1></div>
     <div class="timerbar card" id="timerbar"></div>
-    ${blocks.join('') || `<div class="card">${entryList([])}</div>`}
+    ${blocks.join('') || '<div class="card empty">Nog geen registraties. Start de timer of voeg manueel uren toe.</div>'}
     <div class="row" style="justify-content:center"><button class="btn" id="trk-more">Oudere registraties tonen</button></div>`;
   renderTimer();
-  $$('[data-wk]', page).forEach(el => bindEntryList(el, entries));
+  bindTrackRows(page, groups, entries);
   $('#trk-more').onclick = () => { S.trk.weeks += 4; refreshPage(); };
 }
 
-// =====================================================================
-// Timesheet (week: rij per project, kolom per dag, uren rechtstreeks invullen)
-// =====================================================================
-// "7:30", "7,5", "7.5" of "7" -> seconden; leeg = 0; ongeldig = null
-function parseDur(v) {
-  v = String(v).trim();
-  if (!v) return 0;
-  let m = v.match(/^(\d{1,2}):(\d{1,2})$/);
-  if (m) return Number(m[1]) * 3600 + Number(m[2]) * 60;
-  m = v.match(/^\d+([.,]\d+)?$/);
-  return m ? Math.round(Number(v.replace(',', '.')) * 60) * 60 : null;
+function trackRow(g, child = false) {
+  const e = g.items[0], multi = g.items.length > 1 && !child, running = !e.end_at;
+  const sec = g.items.reduce((t, x) => t + entrySec(x), 0);
+  const first = new Date(Math.min(...g.items.map(entryStart))), last = new Date(Math.max(...g.items.map(entryEnd)));
+  const tags = tagNames(e.tag_ids);
+  return `<div class="te ${child ? 'child' : ''}" data-g="${esc(g.key)}" ${multi ? '' : `data-id="${e.id}"`}>
+    <span class="te-cnt">${multi ? `<button class="cnt ${S.trk.open.has(g.key) ? 'on' : ''}" data-act="toggle" title="${g.items.length} registraties">${g.items.length}</button>` : ''}</span>
+    <input class="te-desc" data-act="desc" value="${esc(e.description)}" placeholder="Omschrijving toevoegen" aria-label="Omschrijving">
+    <button class="te-proj" data-act="proj">${projBtnHtml(e.project_id)}</button>
+    ${S.tagsReady ? `<button class="te-tags ${tags.length ? 'on' : ''}" data-act="tags" title="Tags">${tags.length ? tags.map(t => `<span class="tag t-blue">${esc(t)}</span>`).join('') : icon('tag')}</button>` : ''}
+    <button class="te-bill ${e.billable ? 'on' : ''}" data-act="bill" title="Factureerbaar">€</button>
+    <span class="te-times num">${multi ? `<span class="muted">${hm(first)} – ${e.end_at ? hm(last) : 'nu'}</span>`
+      : `<input class="num" data-act="start" value="${hm(entryStart(e))}" aria-label="Start" inputmode="numeric"><span class="muted">–</span>${running ? '<span class="muted">nu</span>' : `<input class="num" data-act="end" value="${hm(entryEnd(e))}" aria-label="Einde" inputmode="numeric">`}`}</span>
+    ${multi ? '<span class="te-ico"></span>' : `<button class="btn icon ghost te-ico" data-act="date" title="Datum wijzigen" aria-label="Datum wijzigen">${icon('cal')}</button>`}
+    <span class="te-dur num">${running && !multi ? '<span class="tag live">loopt</span>' : fmtHMS(sec)}</span>
+    <button class="btn icon ghost" data-act="play" title="Opnieuw starten" aria-label="Opnieuw starten">${icon('play')}</button>
+    <button class="btn icon ghost" data-act="more" title="Meer" aria-label="Meer">${icon('dots')}</button>
+  </div>`;
 }
 
-async function renderTimesheet(page) {
-  const T = S.ts;
-  if (!T.week) T.week = startOfWeek(new Date());
-  const uid = T.user || S.me.id, wk = T.week, today = startOfDay(new Date());
-  const entries = await fetchEntries({ from: wk, to: addDays(wk, 7), userId: uid });
-  if (S.view !== 'timesheet') return;
-  const cell = (pid, i) => entries.filter(e => (e.project_id || '') === pid).reduce((t, e) => t + clipSec(e, addDays(wk, i), addDays(wk, i + 1)), 0);
-  const ids = [...new Set([...entries.map(e => e.project_id || ''), ...T.extra])];
-  const rows = ids.map(pid => ({ pid, days: [0, 1, 2, 3, 4, 5, 6].map(i => cell(pid, i)) }))
-    .sort((a, b) => (byId(S.projects, a.pid)?.name || '~').localeCompare(byId(S.projects, b.pid)?.name || '~'));
-  const dayTot = [0, 1, 2, 3, 4, 5, 6].map(i => rows.reduce((t, r) => t + r.days[i], 0));
-  const total = dayTot.reduce((a, b) => a + b, 0);
-
-  page.innerHTML = `
-    <div class="page-head">
-      <div><h1>Timesheet</h1><div class="muted">Week ${weekNumber(wk)} · ${fmtDate(wk, { day: 'numeric', month: 'long' })} – ${fmtDate(addDays(wk, 6), { day: 'numeric', month: 'long', year: 'numeric' })}</div></div>
-      <div class="row">
-        ${isAdmin() ? `<select id="ts-user" aria-label="Medewerker">${S.profiles.map(p => `<option value="${p.id}" ${p.id === uid ? 'selected' : ''}>${esc(p.full_name || p.email)}</option>`).join('')}</select>` : ''}
-        <button class="btn icon" id="ts-prev" aria-label="Vorige week">${icon('left')}</button>
-        <button class="btn" id="ts-today">Deze week</button>
-        <button class="btn icon" id="ts-next" aria-label="Volgende week">${icon('right')}</button>
-      </div>
-    </div>
-    <div class="card table-wrap">
-      <table class="ts"><thead><tr><th>Project</th>${[0, 1, 2, 3, 4, 5, 6].map(i => { const d = addDays(wk, i); return `<th class="c ${sameDay(d, today) ? 'today' : ''}">${DAYS_SHORT[i]} ${d.getDate()}</th>`; }).join('')}<th class="r">Totaal</th></tr></thead>
-      <tbody>${rows.map(r => `<tr><td>${projLabel(byId(S.projects, r.pid))}</td>
-        ${r.days.map((sec, i) => `<td class="c"><input class="ts-cell num" data-pid="${r.pid}" data-day="${i}" value="${sec ? fmtHM(sec) : ''}" placeholder="–" aria-label="Uren"></td>`).join('')}
-        <td class="r num"><b>${fmtHM(r.days.reduce((a, b) => a + b, 0))}</b></td></tr>`).join('')}
-        <tr><td colspan="9"><select id="ts-add" aria-label="Project toevoegen" style="max-width:320px">${projectOptions('', { emptyLabel: '+ Project toevoegen…' }).replace('<option value="">', '<option value="" selected disabled hidden>')}<option value="__none">Geen project</option></select></td></tr>
-      </tbody>
-      <tfoot><tr><th>Totaal</th>${dayTot.map(t => `<th class="c num">${fmtHM(t)}</th>`).join('')}<th class="r num">${fmtHM(total)}</th></tr></tfoot></table>
-    </div>
-    <div class="muted small">Typ de uren per dag (bv. <b>7:30</b> of <b>7,5</b>). Meer uren = er komt een registratie bij; minder = de laatste registraties van die dag worden ingekort of verwijderd. Details aanpassen kan in de Calendar of de Time Tracker.</div>`;
-
-  $$('.ts-cell', page).forEach(inp => {
-    inp.onfocus = () => inp.select();
-    inp.onkeydown = e => { if (e.key === 'Enter') inp.blur(); };
-    inp.onchange = async () => {
-      const target = parseDur(inp.value), pid = inp.dataset.pid, i = Number(inp.dataset.day);
-      if (target == null || target > 24 * 3600) { toast('Geef een duur in zoals 7:30 of 7,5 (max. 24 uur).', true); return refreshPage(); }
-      try { await setCellTime(uid, pid, addDays(wk, i), target - cell(pid, i), entries); } catch (err) { fail(err); }
+function bindTrackRows(root, groups, entries) {
+  $$('.te', root).forEach(row => {
+    const g = groups.get(row.dataset.g); if (!g) return;
+    const items = row.dataset.id ? g.items.filter(e => e.id === row.dataset.id) : g.items, e = items[0];
+    const ids = items.map(x => x.id);
+    const save = async patch => {
+      const { error } = await sb.from('time_entries').update(patch).in('id', ids);
+      if (error) return fail(error);
+      if (S.running && ids.includes(S.running.id)) Object.assign(S.running, patch);
       refreshPage();
     };
-  });
-  $('#ts-add').onchange = e => { const v = e.target.value === '__none' ? '' : e.target.value; if (!T.extra.includes(v)) T.extra.push(v); refreshPage(); };
-  $('#ts-prev').onclick = () => { T.week = addDays(wk, -7); T.extra = []; refreshPage(); };
-  $('#ts-next').onclick = () => { T.week = addDays(wk, 7); T.extra = []; refreshPage(); };
-  $('#ts-today').onclick = () => { T.week = startOfWeek(new Date()); T.extra = []; refreshPage(); };
-  if ($('#ts-user')) $('#ts-user').onchange = e => { T.user = e.target.value; refreshPage(); };
-}
-
-// Uren van één project op één dag met `diff` seconden verhogen of verlagen
-async function setCellTime(uid, pid, day, diff, entries) {
-  if (Math.abs(diff) < 60) return;
-  const next = addDays(day, 1);
-  if (diff > 0) {
-    // Nieuwe registratie na de laatste registratie van die dag (alle projecten), anders vanaf 9:00
-    const ends = entries.filter(e => e.end_at && entryEnd(e) > day && entryEnd(e) < next).map(e => entryEnd(e).getTime());
-    const start = new Date(ends.length ? Math.max(...ends) : new Date(day).setHours(9, 0, 0, 0));
-    const p = byId(S.projects, pid);
-    const { error } = await sb.from('time_entries').insert({
-      user_id: uid, project_id: pid || null, description: '', billable: p ? p.billable : true,
-      start_at: start.toISOString(), end_at: new Date(start.getTime() + diff * 1000).toISOString(), ...tagField([])
+    $$('[data-act]', row).forEach(el => {
+      const act = el.dataset.act;
+      if (act === 'toggle') el.onclick = () => { S.trk.open.has(g.key) ? S.trk.open.delete(g.key) : S.trk.open.add(g.key); refreshPage(); };
+      if (act === 'desc') { el.onchange = () => save({ description: el.value.trim() }); el.onkeydown = ev => { if (ev.key === 'Enter') el.blur(); }; }
+      if (act === 'proj') el.onclick = () => pickProject(el, e.project_id, pid => { const p = byId(S.projects, pid); save({ project_id: pid, ...(p ? { billable: p.billable } : {}) }); });
+      if (act === 'tags') bindTagPicker(el, () => e.tag_ids || [], ids2 => { e.tag_ids = ids2; clearTimeout(el._t); el._t = setTimeout(() => save({ tag_ids: ids2 }), 600); });
+      if (act === 'bill') el.onclick = () => save({ billable: !e.billable });
+      if (act === 'start' || act === 'end') { el.onfocus = () => el.select(); el.onkeydown = ev => { if (ev.key === 'Enter') el.blur(); }; }
+      if (act === 'start' || act === 'end') el.onchange = () => {
+        const t = parseHM(el.value); if (!t) { toast('Geef een tijd in zoals 9:30 of 0930.', true); return refreshPage(); }
+        const [h, m] = t;
+        const base = startOfDay(entryStart(e)), s = act === 'start' ? new Date(base.setHours(h, m)) : entryStart(e);
+        let en = act === 'end' ? new Date(new Date(startOfDay(entryStart(e))).setHours(h, m)) : e.end_at ? entryEnd(e) : null;
+        if (en && en <= s) en = addDays(en, 1);
+        if (en && en - s > 24 * 3600000) { toast('Een registratie kan maximaal 24 uur duren.', true); return refreshPage(); }
+        save({ start_at: s.toISOString(), ...(en ? { end_at: en.toISOString() } : {}) });
+      };
+      if (act === 'date') el.onclick = () => openMenu(el, `<div style="padding:6px 8px"><input type="date" value="${ymd(entryStart(e))}" aria-label="Datum"></div>`, m => {
+        $('input', m).onchange = ev => {
+          const d = parseYmd(ev.target.value), shift = startOfDay(d) - startOfDay(entryStart(e));
+          closeMenu(); save({ start_at: new Date(entryStart(e).getTime() + shift).toISOString(), ...(e.end_at ? { end_at: new Date(entryEnd(e).getTime() + shift).toISOString() } : {}) });
+        };
+      });
+      if (act === 'play') el.onclick = () => startTimer(e);
+      if (act === 'more') el.onclick = () => openMenu(el, items.length > 1
+        ? `<button class="mi" data-m="open">${S.trk.open.has(g.key) ? 'Inklappen' : 'Uitklappen'}</button><button class="mi danger" data-m="del">Alle ${items.length} verwijderen</button>`
+        : `<button class="mi" data-m="edit">Bewerken</button><button class="mi" data-m="dup">Dupliceren</button><button class="mi danger" data-m="del">Verwijderen</button>`, m => {
+        $$('[data-m]', m).forEach(x => x.onclick = async () => {
+          closeMenu();
+          if (x.dataset.m === 'open') { S.trk.open.has(g.key) ? S.trk.open.delete(g.key) : S.trk.open.add(g.key); return refreshPage(); }
+          if (x.dataset.m === 'edit') return openEntryModal(e);
+          if (x.dataset.m === 'dup') {
+            if (!e.end_at) return toast('Een lopende timer kan je niet dupliceren.', true);
+            const { error } = await sb.from('time_entries').insert({ user_id: e.user_id, description: e.description, project_id: e.project_id, billable: e.billable, start_at: e.start_at, end_at: e.end_at, ...tagField(e.tag_ids) });
+            if (error) return fail(error);
+            toast('Registratie gedupliceerd'); return refreshPage();
+          }
+          if (!confirm(items.length > 1 ? `Deze ${items.length} registraties verwijderen?` : 'Deze registratie verwijderen?')) return;
+          const { error } = await sb.from('time_entries').delete().in('id', ids);
+          if (error) return fail(error);
+          if (S.running && ids.includes(S.running.id)) { S.running = null; renderTimer(); }
+          toast('Verwijderd'); refreshPage();
+        });
+      });
     });
-    if (error) throw error;
-    return;
-  }
-  // Verlagen: laatste afgeronde registraties van die dag inkorten of verwijderen
-  let remove = -diff;
-  const list = entries.filter(e => (e.project_id || '') === pid && e.end_at && entryStart(e) >= day && entryStart(e) < next).sort((a, b) => entryStart(b) - entryStart(a));
-  for (const e of list) {
-    if (remove <= 0) break;
-    const sec = entrySec(e);
-    const q = sec <= remove + 30 ? sb.from('time_entries').delete().eq('id', e.id)
-      : sb.from('time_entries').update({ end_at: new Date(entryEnd(e).getTime() - remove * 1000).toISOString() }).eq('id', e.id);
-    const { error } = await q;
-    if (error) throw error;
-    remove -= sec;
-  }
-  if (remove > 60) toast('Niet alles kon ingekort worden (een timer loopt nog of de registratie begon de dag ervoor).', true);
+  });
 }
 
 // =====================================================================
-// Dashboard
+// Dashboard (zoals Clockify: totaal, topproject/-klant, staven per dag, ring, top-activiteiten)
 // =====================================================================
+const DASH_GROUPS = [['project', 'Project'], ['client', 'Klant'], ['tag', 'Tag'], ['user', 'Medewerker']];
 async function renderDashboard(page) {
-  const now = new Date(), today = startOfDay(now), wk = startOfWeek(now), mo = startOfMonth(now);
-  const from = new Date(Math.min(wk, mo, addDays(today, -6)));
-  const entries = await fetchEntries({ from, to: addDays(today, 1), userId: S.me.id });
+  const D = S.dash;
+  if (!D.from) [D.from, D.to] = rangeOf('week');
+  const team = isAdmin() && D.who === 'team';
+  if (!team && D.group === 'user') D.group = 'project';
+  const entries = await fetchEntries({ from: D.from, to: D.to, userId: team ? null : S.me.id });
   if (S.view !== 'dashboard') return;
-
-  const sum = (a, b) => entries.reduce((t, e) => t + clipSec(e, a, b), 0);
-  const tToday = sum(today, addDays(today, 1));
-  const tWeek = sum(wk, addDays(wk, 7));
-  const tMonth = sum(mo, new Date(now.getFullYear(), now.getMonth() + 1, 1));
-  const weekEntries = entries.filter(e => clipSec(e, wk, addDays(wk, 7)) > 0);
-  const tBill = weekEntries.filter(e => e.billable).reduce((t, e) => t + clipSec(e, wk, addDays(wk, 7)), 0);
-  const target = Number(S.me.weekly_target || 0) * 3600;
-  const daily = perDay(entries, wk, 7);
-
-  const byProj = new Map();
-  for (const e of weekEntries) {
-    const k = e.project_id || '';
-    byProj.set(k, (byProj.get(k) || 0) + clipSec(e, wk, addDays(wk, 7)));
+  const secOf = e => clipSec(e, D.from, D.to);
+  const total = entries.reduce((t, e) => t + secOf(e), 0);
+  const rows = groupRows(entries, D.group, secOf).map((r, i) => ({ ...r, name: groupText(r, D.group), color: groupColor(D.group, r.k, i) }));
+  const topP = groupRows(entries, 'project', secOf)[0], topC = groupRows(entries, 'client', secOf).filter(r => r.k)[0];
+  const acts = new Map();
+  for (const e of entries) {
+    const k = e.description.trim().toLowerCase() + '|' + (e.project_id || '');
+    const a = acts.get(k) || { e, sec: 0 }; a.sec += secOf(e); acts.set(k, a);
   }
-  const projRows = [...byProj].map(([id, sec]) => {
-    const p = byId(S.projects, id);
-    return { name: p ? p.name : 'Geen project', color: p ? p.color : NO_PROJECT_COLOR, sec };
-  }).sort((a, b) => b.sec - a.sec);
-
-  const recent = entries.filter(e => entryStart(e) >= addDays(today, -6));
-  const hello = now.getHours() < 12 ? 'Goedemorgen' : now.getHours() < 18 ? 'Goedemiddag' : 'Goedenavond';
+  const top = [...acts.values()].sort((a, b) => b.sec - a.sec).slice(0, 10);
 
   page.innerHTML = `
-    <div class="page-head"><div><h1>${hello}, ${esc((S.me.full_name || '').split(' ')[0] || 'collega')}</h1><div class="muted">Week ${weekNumber(now)} · ${fmtDate(wk, { day: 'numeric', month: 'short' })} – ${fmtDate(addDays(wk, 6), { day: 'numeric', month: 'short' })}</div></div></div>
-    <div class="tiles">
-      <div class="card tile"><div class="label">Vandaag</div><div class="value num">${fmtHM(tToday)}</div><div class="sub">${S.running ? 'Timer loopt' : 'uren:minuten'}</div></div>
-      <div class="card tile"><div class="label">Deze week</div><div class="value num">${fmtHM(tWeek)}</div>
-        ${target ? `<div class="sub">${Math.round(tWeek / target * 100)}% van ${fmtHM(target)} doel</div><div class="meter ${tWeek > target ? 'over' : ''}"><span style="width:${Math.min(100, tWeek / target * 100)}%"></span></div>` : ''}</div>
-      <div class="card tile"><div class="label">Deze maand</div><div class="value num">${fmtHM(tMonth)}</div><div class="sub">${fmtDate(now, { month: 'long' })}</div></div>
-      <div class="card tile"><div class="label">Factureerbaar (week)</div><div class="value num">${tWeek ? Math.round(tBill / tWeek * 100) : 0}%</div><div class="sub">${fmtHM(tBill)} van ${fmtHM(tWeek)}</div></div>
+    <div class="page-head"><h1>Dashboard</h1>
+      <div class="row">
+        <select id="d-group" aria-label="Groeperen op">${DASH_GROUPS.filter(g => team || g[0] !== 'user').map(([k, l]) => `<option value="${k}" ${D.group === k ? 'selected' : ''}>${l}</option>`).join('')}</select>
+        ${isAdmin() ? `<select id="d-who" aria-label="Wie"><option value="me">Enkel ik</option><option value="team" ${team ? 'selected' : ''}>Team</option></select>` : ''}
+        ${rangeHtml(D.from, D.to)}
+      </div>
     </div>
-    <div class="cols">
-      <div class="card"><div class="card-head"><h2>Uren per dag</h2><span class="muted small">deze week</span></div><div class="card-body"><div class="chart" id="d-chart"></div></div></div>
-      <div class="card"><div class="card-head"><h2>Projecten</h2><span class="muted small">deze week</span></div><div class="card-body">${hbars(projRows.slice(0, 8), tWeek)}</div></div>
-    </div>
-    ${isAdmin() ? '<div class="card" id="d-live"></div>' : ''}
-    <div class="card"><div class="card-head"><h2>Recente registraties</h2><a href="#tracker" class="small">Naar Time Tracker</a></div><div id="d-list">${entryList(recent)}</div></div>`;
+    <div class="dash">
+      <div class="card">
+        <div class="kpis">
+          <div><div class="label">Totale tijd</div><div class="v num">${fmtHMS(total)}</div></div>
+          <div><div class="label">Topproject</div><div class="v sm">${topP ? esc(groupText(topP, 'project')) : '–'}</div></div>
+          <div><div class="label">Topklant</div><div class="v sm">${topC ? esc(groupText(topC, 'client')) : '–'}</div></div>
+        </div>
+        <div class="card-body"><div class="chart" id="d-chart"></div></div>
+        <div class="dash-split">
+          <div class="donut-wrap">${donut(rows, total)}</div>
+          <div class="dlist">${rows.length ? rows.slice(0, 12).map(r => `
+            <div class="drow" data-tip="<b>${esc(r.name)}</b><br>${fmtHMS(r.sec)}">
+              <span class="dn">${esc(r.name)}</span><span class="num">${fmtHMS(r.sec)}</span>
+              <span class="track"><span style="width:${total ? r.sec / rows[0].sec * 100 : 0}%;background:${esc(r.color)}"></span></span>
+              <span class="num muted">${total ? (r.sec / total * 100).toFixed(2).replace('.', ',') : 0}%</span>
+            </div>`).join('') : '<div class="empty">Geen uren in deze periode.</div>'}</div>
+        </div>
+      </div>
+      <div class="card side-list">
+        <div class="card-head"><h2>Meest geregistreerde activiteiten</h2><span class="muted small">Top 10</span></div>
+        ${top.length ? top.map(a => `<div class="act"><div class="desc"><div>${a.e.description ? esc(a.e.description) : '<span class="muted">(geen omschrijving)</span>'}</div><div class="small">${projLabel(projectOf(a.e))}</div></div><span class="num">${fmtHMS(a.sec)}</span></div>`).join('') : '<div class="empty">Nog niets.</div>'}
+      </div>
+    </div>`;
 
-  barChart($('#d-chart'), daily.map((sec, i) => {
-    const d = addDays(wk, i);
-    return { label: `${DAYS_SHORT[i]} ${d.getDate()}`, value: sec / 3600, tip: `<b>${esc(fmtDate(d, { weekday: 'long', day: 'numeric', month: 'long' }))}</b><br>${fmtHM(sec)} u` };
-  }));
-  bindEntryList($('#d-list'), recent);
-  if (isAdmin()) renderLiveTeam($('#d-live'));
-}
+  // Gestapelde staven per dag/week/maand, gekleurd per groep (top 8, rest grijs)
+  const colorOf = new Map(rows.slice(0, 8).map(r => [r.k, r.color]));
+  barChart($('#d-chart'), buckets(D.from, D.to).map(k => {
+    const per = new Map();
+    for (const e of entries) {
+      const sec = clipSec(e, k.a, k.b); if (!sec) continue;
+      for (const g of groupKeys(e, D.group)) { const c = colorOf.has(g) ? g : '~'; per.set(c, (per.get(c) || 0) + sec); }
+    }
+    const segs = [...per].map(([g, sec]) => ({ value: sec / 3600, color: colorOf.get(g) || NO_PROJECT_COLOR }));
+    const sum = [...per.values()].reduce((a, b) => a + b, 0);
+    return { label: k.label, value: sum / 3600, segs, valueLabel: fmtHM(sum), tip: `<b>${esc(k.tip)}</b><br>${fmtHMS(sum)}` };
+  }), { showValues: false });
 
-async function renderLiveTeam(el) {
-  const { data, error } = await sb.rpc('team_summary', { week_start: startOfWeek(new Date()).toISOString() });
-  if (error) return fail(error);
-  const live = data.filter(r => r.running_since);
-  el.innerHTML = `<div class="card-head"><h2>Nu aan het werk</h2><a href="#team" class="small">Team</a></div>
-    ${live.length ? `<table><tbody>${live.map(r => {
-      const p = profileOf(r.user_id), pj = byId(S.projects, r.running_project);
-      return `<tr><td><span class="row">${avatar(p)}${esc(p?.full_name || p?.email)}</span></td><td>${projLabel(pj)}</td><td class="r num muted">sinds ${hm(new Date(r.running_since))}</td></tr>`;
-    }).join('')}</tbody></table>` : '<div class="empty">Er loopt momenteel geen timer bij je team.</div>'}`;
+  const set = patch => { Object.assign(D, patch); refreshPage(); };
+  $('#d-group').onchange = e => set({ group: e.target.value });
+  if ($('#d-who')) $('#d-who').onchange = e => set({ who: e.target.value });
+  bindRange(page, D.from, D.to, (from, to) => set({ from, to }));
 }
 
 // =====================================================================
-// Kalender (weekweergave)
+// Calendar (week of dag, zoom, collega kiezen)
 // =====================================================================
-const HOUR_PX = 48;
 async function renderCalendar(page) {
-  if (!S.cal.week) S.cal.week = startOfWeek(new Date());
-  const uid = S.cal.user || S.me.id;
-  const wk = S.cal.week, end = addDays(wk, 7);
-  const entries = await fetchEntries({ from: wk, to: end, userId: uid });
+  const C = S.cal, today = startOfDay(new Date());
+  if (!C.from) C.from = startOfWeek(today);
+  const nd = C.mode === 'day' ? 1 : 7, from = C.from, to = addDays(from, nd), HP = C.zoom;
+  const uid = C.user || S.me.id;
+  const entries = await fetchEntries({ from, to, userId: uid });
   if (S.view !== 'calendar') return;
-  const daily = perDay(entries, wk, 7);
-  const total = daily.reduce((a, b) => a + b, 0);
-  const today = startOfDay(new Date());
+  const daily = perDay(entries, from, nd);
+  const who = profileOf(uid);
 
   page.innerHTML = `
     <div class="page-head">
-      <div><h1>Calendar</h1><div class="muted">Week ${weekNumber(wk)} · ${fmtDate(wk, { day: 'numeric', month: 'long' })} – ${fmtDate(addDays(wk, 6), { day: 'numeric', month: 'long', year: 'numeric' })} · totaal <b class="num">${fmtHM(total)}</b></div></div>
+      <div class="row"><h1>Calendar</h1><div class="seg" id="c-mode"><button data-m="week" class="${nd === 7 ? 'on' : ''}">Week</button><button data-m="day" class="${nd === 1 ? 'on' : ''}">Dag</button></div></div>
       <div class="row">
-        ${isAdmin() ? `<select id="c-user" aria-label="Medewerker">${S.profiles.map(p => `<option value="${p.id}" ${p.id === uid ? 'selected' : ''}>${esc(p.full_name || p.email)}</option>`).join('')}</select>` : ''}
-        <button class="btn icon" id="c-prev" aria-label="Vorige week">${icon('left')}</button>
-        <button class="btn" id="c-today">Deze week</button>
-        <button class="btn icon" id="c-next" aria-label="Volgende week">${icon('right')}</button>
+        <div class="seg" id="c-zoom"><button data-z="-12" aria-label="Uitzoomen" ${HP <= 24 ? 'disabled' : ''}>−</button><button data-z="12" aria-label="Inzoomen" ${HP >= 96 ? 'disabled' : ''}>+</button></div>
+        ${isAdmin() ? `<button class="btn" id="c-user">${avatar(who)}<span>${esc(uid === S.me.id ? 'Ik' : who?.full_name || who?.email || '')}</span>${icon('down')}</button>` : ''}
+        ${rangeHtml(from, to)}
       </div>
     </div>
-    <div class="card cal" id="cal">
+    <div class="card cal" style="--cols:${nd}">
       <div class="cal-dayhead" style="border-left:0"></div>
-      ${[0, 1, 2, 3, 4, 5, 6].map(i => { const d = addDays(wk, i); return `<div class="cal-dayhead ${sameDay(d, today) ? 'today' : ''}"><div class="dn">${DAYS_SHORT[i]}</div><div class="dd">${d.getDate()}</div><div class="tot num">${fmtHM(daily[i])}</div></div>`; }).join('')}
+      ${daily.map((sec, i) => { const d = addDays(from, i); return `<div class="cal-dayhead ${sameDay(d, today) ? 'today' : ''}"><div class="dn">${esc(fmtDate(d, { weekday: 'short', day: 'numeric', month: 'short' }))}</div><div class="tot num">${fmtHMS(sec)}</div></div>`; }).join('')}
       <div class="cal-scroll" id="cal-scroll">
-        <div class="cal-hours">${Array.from({ length: 24 }, (_, h) => `<div>${h ? pad(h) + ':00' : ''}</div>`).join('')}</div>
-        ${[0, 1, 2, 3, 4, 5, 6].map(i => `<div class="cal-col ${sameDay(addDays(wk, i), today) ? 'today' : ''}" data-day="${i}" style="height:${24 * HOUR_PX}px"></div>`).join('')}
+        <div class="cal-hours">${Array.from({ length: 24 }, (_, h) => `<div style="height:${HP}px">${h ? pad(h) + ':00' : ''}</div>`).join('')}</div>
+        ${daily.map((_, i) => `<div class="cal-col ${sameDay(addDays(from, i), today) ? 'today' : ''}" data-day="${i}" style="height:${24 * HP}px;--hp:${HP}px"></div>`).join('')}
       </div>
     </div>
     <div class="muted small">Klik op een leeg vak om een registratie toe te voegen, klik op een blok om te bewerken.</div>`;
 
   // Blokken per dag positioneren, met kolommen voor overlappende registraties
   $$('.cal-col', page).forEach(col => {
-    const i = Number(col.dataset.day), d0 = addDays(wk, i), d1 = addDays(wk, i + 1);
+    const i = Number(col.dataset.day), d0 = addDays(from, i), d1 = addDays(from, i + 1);
     const segs = entries.map(e => ({ e, s: new Date(Math.max(entryStart(e), d0)), t: new Date(Math.min(entryEnd(e), d1)) }))
       .filter(x => x.t > x.s).sort((a, b) => a.s - b.s || b.t - a.t);
     let cluster = [], clusterEnd = 0;
@@ -961,166 +1100,179 @@ async function renderCalendar(page) {
     flush();
     col.innerHTML = segs.map(g => {
       const p = projectOf(g.e), color = p ? p.color : NO_PROJECT_COLOR;
-      const top = (g.s - d0) / 3600000 * HOUR_PX, h = Math.max(18, (g.t - g.s) / 3600000 * HOUR_PX - 2);
-      const w = 100 / g.ncol;
+      const top = (g.s - d0) / 3600000 * HP, h = Math.max(18, (g.t - g.s) / 3600000 * HP - 2), w = 100 / g.ncol;
       return `<div class="cal-ev ${g.e.end_at ? '' : 'running'}" data-id="${g.e.id}" style="top:${top}px;height:${h}px;left:calc(${g.col * w}% + 2px);width:calc(${w}% - 4px);background:color-mix(in srgb, ${color} 18%, var(--surface));border-left:3px solid ${color}"
-        data-tip="<b>${esc(g.e.description || '(geen omschrijving)')}</b><br>${esc(p?.name || 'Geen project')}${tagNames(g.e.tag_ids).length ? '<br>' + esc(tagNames(g.e.tag_ids).join(', ')) : ''}<br>${hm(entryStart(g.e))} – ${g.e.end_at ? hm(entryEnd(g.e)) : 'nu'} · ${fmtHM(entrySec(g.e))}">
+        data-tip="<b>${esc(g.e.description || '(geen omschrijving)')}</b><br>${esc(p?.name || 'Geen project')}${tagNames(g.e.tag_ids).length ? '<br>' + esc(tagNames(g.e.tag_ids).join(', ')) : ''}<br>${hm(entryStart(g.e))} – ${g.e.end_at ? hm(entryEnd(g.e)) : 'nu'} · ${fmtHMS(entrySec(g.e))}">
         <div class="t">${esc(g.e.description || p?.name || '(geen omschrijving)')}</div>
-        ${h > 34 ? `<div class="s">${esc(p?.name || 'Geen project')} · ${fmtHM((g.t - g.s) / 1000)}</div>` : ''}
+        ${h > 34 ? `<div class="s">${esc(g.e.description ? p?.name || 'Geen project' : clientOf(p)?.name || '')} · ${fmtHM((g.t - g.s) / 1000)}</div>` : ''}
       </div>`;
     }).join('');
     if (sameDay(d0, today)) {
       const now = new Date();
-      col.insertAdjacentHTML('beforeend', `<div class="now-line" style="top:${(now - d0) / 3600000 * HOUR_PX}px"></div>`);
+      col.insertAdjacentHTML('beforeend', `<div class="now-line" style="top:${(now - d0) / 3600000 * HP}px"></div>`);
     }
     col.addEventListener('click', ev => {
       const evEl = ev.target.closest('.cal-ev');
       if (evEl) { openEntryModal(entries.find(x => x.id === evEl.dataset.id)); return; }
-      const mins = Math.floor((ev.offsetY / HOUR_PX) * 60 / 15) * 15;
+      const mins = Math.floor((ev.offsetY / HP) * 60 / 15) * 15;
       const s = new Date(d0); s.setMinutes(mins);
       openEntryModal(null, { start: s.getTime(), end: s.getTime() + 3600000, user_id: uid });
     });
   });
 
   const sc = $('#cal-scroll');
-  const firstHour = entries.length ? Math.min(...entries.map(e => Math.max(wk, entryStart(e))).map(t => new Date(t).getHours())) : 7;
-  sc.scrollTop = Math.max(0, Math.min(7, firstHour) * HOUR_PX - 8);
+  const firstHour = entries.length ? Math.min(...entries.map(e => new Date(Math.max(from, entryStart(e))).getHours())) : 8;
+  sc.scrollTop = Math.max(0, Math.min(8, firstHour) * HP - 8);
 
-  $('#c-prev').onclick = () => { S.cal.week = addDays(wk, -7); refreshPage(); };
-  $('#c-next').onclick = () => { S.cal.week = addDays(wk, 7); refreshPage(); };
-  $('#c-today').onclick = () => { S.cal.week = startOfWeek(new Date()); refreshPage(); };
-  if ($('#c-user')) $('#c-user').onchange = e => { S.cal.user = e.target.value; refreshPage(); };
+  $$('#c-mode button').forEach(b => b.onclick = () => {
+    C.mode = b.dataset.m;
+    C.from = C.mode === 'day' ? (today >= from && today < to ? today : from) : startOfWeek(from);
+    refreshPage();
+  });
+  $$('#c-zoom button').forEach(b => b.onclick = () => { C.zoom = Math.min(96, Math.max(24, HP + Number(b.dataset.z))); refreshPage(); });
+  bindRange(page, from, to, a => { C.from = C.mode === 'day' ? a : startOfWeek(a); refreshPage(); });
+  if ($('#c-user')) $('#c-user').onclick = () => pickFrom($('#c-user'), S.profiles.filter(p => p.active).map(p => ({ id: p.id, label: p.full_name || p.email, extra: p.id === S.me.id ? '(ik)' : '' })), uid,
+    v => { C.user = v || S.me.id; refreshPage(); }, { placeholder: 'Zoek collega…' });
 }
 
 // =====================================================================
-// Rapporten
+// Reports (Samenvatting / Gedetailleerd / Wekelijks, zoals Clockify)
 // =====================================================================
-const PRESETS = [['week', 'Deze week'], ['lastweek', 'Vorige week'], ['month', 'Deze maand'], ['lastmonth', 'Vorige maand'], ['year', 'Dit jaar'], ['custom', 'Aangepast']];
-function presetRange(k) {
-  const now = new Date(), wk = startOfWeek(now), mo = startOfMonth(now);
-  switch (k) {
-    case 'week': return [wk, addDays(wk, 6)];
-    case 'lastweek': return [addDays(wk, -7), addDays(wk, -1)];
-    case 'month': return [mo, addDays(new Date(now.getFullYear(), now.getMonth() + 1, 1), -1)];
-    case 'lastmonth': return [new Date(now.getFullYear(), now.getMonth() - 1, 1), addDays(mo, -1)];
-    case 'year': return [new Date(now.getFullYear(), 0, 1), new Date(now.getFullYear(), 11, 31)];
-  }
-  return null;
-}
-const GROUPS = [['project', 'Project'], ['user', 'Medewerker'], ['client', 'Klant'], ['tag', 'Tag'], ['day', 'Dag'], ['description', 'Omschrijving']];
+const GROUPS = [['project', 'Project'], ['client', 'Klant'], ['user', 'Medewerker'], ['tag', 'Tag'], ['day', 'Dag'], ['description', 'Omschrijving']];
+const TABS = [['summary', 'Samenvatting'], ['detailed', 'Gedetailleerd'], ['weekly', 'Wekelijks']];
 
 async function renderReports(page) {
   const R = S.rep;
-  if (R.preset !== 'custom') { const [a, b] = presetRange(R.preset); R.from = ymd(a); R.to = ymd(b); }
-  const from = parseYmd(R.from), to = addDays(parseYmd(R.to), 1);
+  if (!R.from) [R.from, R.to] = rangeOf('week');
+  const from = R.from, to = R.to;
   const userId = isAdmin() ? (R.user || null) : S.me.id;
   let entries = await fetchEntries({ from, to, userId, projectId: R.project || null });
   if (S.view !== 'reports') return;
-  if (R.client) entries = entries.filter(e => projectOf(e)?.client_id === R.client);
+  if (R.client) entries = entries.filter(e => R.client === '__none' ? !projectOf(e)?.client_id : projectOf(e)?.client_id === R.client);
   if (R.tag) entries = entries.filter(e => R.tag === '__none' ? !e.tag_ids?.length : e.tag_ids?.includes(R.tag));
+  if (R.desc) entries = entries.filter(e => e.description.toLowerCase().includes(R.desc.toLowerCase()));
+  if (!isAdmin()) { if (R.g1 === 'user') R.g1 = 'project'; if (R.g2 === 'user') R.g2 = 'description'; }
 
   const secOf = e => clipSec(e, from, to);
   const total = entries.reduce((a, e) => a + secOf(e), 0);
-  const billSec = entries.filter(e => e.billable).reduce((a, e) => a + secOf(e), 0);
   const amount = entries.reduce((a, e) => a + amountFor(e, secOf(e)), 0);
-  const days = Math.round((to - from) / DAY_MS);
+  const groups = GROUPS.filter(g => isAdmin() || g[0] !== 'user').filter(g => S.tagsReady || g[0] !== 'tag');
+  const fbtn = (k, label, val) => `<button class="fbtn ${val ? 'on' : ''}" data-f="${k}">${label}${val ? `: <b>${esc(val)}</b>` : ''}${icon('down')}</button>`;
+  const nameOfFilter = {
+    user: R.user && (profileOf(R.user)?.full_name || ''), client: R.client && (R.client === '__none' ? 'zonder klant' : byId(S.clients, R.client)?.name || ''),
+    project: R.project && (byId(S.projects, R.project)?.name || ''), tag: R.tag && (R.tag === '__none' ? 'zonder tag' : byId(S.tags, R.tag)?.name || '')
+  };
 
   page.innerHTML = `
-    <div class="page-head"><h1>Reports</h1>
-      <div class="row"><button class="btn" id="r-pdf">${icon('pdf')}PDF exporteren</button><button class="btn" id="r-csv">${icon('dl')}CSV exporteren</button></div></div>
-    <div class="card card-body" style="display:flex;flex-direction:column;gap:12px">
-      <div class="row">
-        <div class="seg" id="r-preset">${PRESETS.map(([k, l]) => `<button data-p="${k}" class="${R.preset === k ? 'on' : ''}">${l}</button>`).join('')}</div>
-        <input type="date" id="r-from" value="${R.from}" aria-label="Van"><span class="muted">tot</span><input type="date" id="r-to" value="${R.to}" aria-label="Tot">
-      </div>
-      <div class="row">
-        ${isAdmin() ? `<select id="r-user" aria-label="Medewerker"><option value="">Alle medewerkers</option>${S.profiles.map(p => `<option value="${p.id}" ${p.id === R.user ? 'selected' : ''}>${esc(p.full_name || p.email)}</option>`).join('')}</select>` : ''}
-        <select id="r-client" aria-label="Klant"><option value="">Alle klanten</option>${S.clients.map(c => `<option value="${c.id}" ${c.id === R.client ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select>
-        <select id="r-project" aria-label="Project">${projectOptions(R.project, { includeArchived: true, emptyLabel: 'Alle projecten' })}</select>
-        ${S.tagsReady ? `<select id="r-tag" aria-label="Tag"><option value="">Alle tags</option><option value="__none" ${R.tag === '__none' ? 'selected' : ''}>Zonder tag</option>${S.tags.map(t => `<option value="${t.id}" ${t.id === R.tag ? 'selected' : ''}>${esc(t.name)}</option>`).join('')}</select>` : ''}
-      </div>
+    <div class="page-head">
+      <div class="seg" id="r-tab">${TABS.map(([k, l]) => `<button data-t="${k}" class="${R.tab === k ? 'on' : ''}">${l}</button>`).join('')}</div>
+      <div class="row">${rangeHtml(from, to)}<button class="btn" id="r-exp">${icon('dl')}Exporteren${icon('down')}</button></div>
     </div>
-    <div class="tiles">
-      <div class="card tile"><div class="label">Totaal</div><div class="value num">${fmtHM(total)}</div><div class="sub">${fmtDec(total)} uur</div></div>
-      <div class="card tile"><div class="label">Factureerbaar</div><div class="value num">${fmtHM(billSec)}</div><div class="sub">${total ? Math.round(billSec / total * 100) : 0}% van totaal</div></div>
-      <div class="card tile"><div class="label">Bedrag</div><div class="value num">${fmtMoney(amount)}</div><div class="sub">factureerbare uren × tarief</div></div>
-      <div class="card tile"><div class="label">Registraties</div><div class="value num">${entries.length}</div><div class="sub">${days} dag${days === 1 ? '' : 'en'}</div></div>
+    <div class="card filterbar">
+      <span class="flabel">Filter</span>
+      ${isAdmin() ? fbtn('user', 'Team', nameOfFilter.user) : ''}
+      ${fbtn('client', 'Klant', nameOfFilter.client)}
+      ${fbtn('project', 'Project', nameOfFilter.project)}
+      ${S.tagsReady ? fbtn('tag', 'Tag', nameOfFilter.tag) : ''}
+      <input id="r-desc" placeholder="Omschrijving bevat…" value="${esc(R.desc)}" aria-label="Omschrijving">
+      ${R.user || R.client || R.project || R.tag || R.desc ? '<button class="linkbtn" id="r-clear">Filters wissen</button>' : ''}
     </div>
-    <div class="card"><div class="card-head"><h2>Uren per ${days <= 31 ? 'dag' : days <= 120 ? 'week' : 'maand'}</h2></div><div class="card-body"><div class="chart" id="r-chart"></div></div></div>
     <div class="card">
-      <div class="card-head">
-        <div class="seg" id="r-tab"><button data-t="summary" class="${R.tab === 'summary' ? 'on' : ''}">Samenvatting</button><button data-t="detail" class="${R.tab === 'detail' ? 'on' : ''}">Gedetailleerd</button></div>
-        ${R.tab === 'summary' ? `<label class="row small muted">Groeperen op <select id="r-group">${GROUPS.filter(g => (isAdmin() || g[0] !== 'user') && (S.tagsReady || g[0] !== 'tag')).map(([k, l]) => `<option value="${k}" ${R.group === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label>` : ''}
+      <div class="sumband">
+        <span>Totaal: <b class="num">${fmtHMS(total)}</b></span>
+        ${amount > 0 ? `<span>Bedrag: <b class="num">${fmtMoney(amount)}</b></span>` : ''}
+        <span class="muted small">${entries.length} registraties</span>
       </div>
-      <div class="table-wrap" id="r-table"></div>
-    </div>`;
+      <div class="card-body"><div class="chart" id="r-chart"></div></div>
+    </div>
+    <div class="card" id="r-body"></div>`;
 
-  // Grafiek: emmers per dag/week/maand
-  const buckets = [];
-  if (days <= 31) for (let i = 0; i < days; i++) { const d = addDays(from, i); buckets.push({ a: d, b: addDays(d, 1), label: days <= 7 ? `${DAYS_SHORT[(d.getDay() + 6) % 7]} ${d.getDate()}` : String(d.getDate()), tip: fmtDate(d, { weekday: 'long', day: 'numeric', month: 'long' }) }); }
-  else if (days <= 120) for (let d = startOfWeek(from); d < to; d = addDays(d, 7)) buckets.push({ a: new Date(Math.max(d, from)), b: new Date(Math.min(addDays(d, 7), to)), label: `W${weekNumber(d)}`, tip: `Week ${weekNumber(d)} (${fmtDate(d, { day: 'numeric', month: 'short' })})` });
-  else for (let d = startOfMonth(from); d < to; d = new Date(d.getFullYear(), d.getMonth() + 1, 1)) buckets.push({ a: new Date(Math.max(d, from)), b: new Date(Math.min(new Date(d.getFullYear(), d.getMonth() + 1, 1), to)), label: fmtDate(d, { month: 'short' }), tip: fmtDate(d, { month: 'long', year: 'numeric' }) });
-  barChart($('#r-chart'), buckets.map(k => {
+  // Grafiek: één kleur, waarde boven de staaf (zoals Clockify)
+  const bk = buckets(from, to);
+  barChart($('#r-chart'), bk.map(k => {
     const sec = entries.reduce((t, e) => t + clipSec(e, k.a, k.b), 0);
-    return { label: k.label, value: sec / 3600, valueLabel: fmtHM(sec), tip: `<b>${esc(k.tip)}</b><br>${fmtHM(sec)} u` };
-  }), { showValues: buckets.length <= 14 });
+    return { label: k.label, value: sec / 3600, valueLabel: fmtHMS(sec), tip: `<b>${esc(k.tip)}</b><br>${fmtHMS(sec)}` };
+  }), { showValues: bk.length <= 14 });
 
-  const tbl = $('#r-table');
+  const body = $('#r-body');
   if (R.tab === 'summary') {
-    const nameOf = r => {
-      if (R.group === 'project') return projLabel(byId(S.projects, r.k));
-      if (R.group === 'user') { const p = profileOf(r.k); return p ? `<span class="row">${avatar(p)}${esc(p.full_name || p.email)}</span>` : `<span class="muted">${esc(entryUserName(r.sample) || 'Onbekend')}</span>`; }
-      if (R.group === 'client') return esc(byId(S.clients, r.k)?.name || 'Zonder klant');
-      if (R.group === 'tag') return r.k ? `<span class="tag">${esc(byId(S.tags, r.k)?.name || 'Onbekende tag')}</span>` : '<span class="muted">Zonder tag</span>';
-      if (R.group === 'day') return esc(fmtDate(parseYmd(r.k), { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }));
-      return r.sample.description ? esc(r.sample.description) : '<span class="muted">(geen omschrijving)</span>';
-    };
-    const rows = groupRows(entries, R.group, secOf);
-    tbl.innerHTML = rows.length ? `<table><thead><tr><th>${GROUPS.find(x => x[0] === R.group)[1]}</th><th class="r">Uren</th><th class="r">Factureerbaar</th><th class="r">Bedrag</th><th style="width:22%">Aandeel</th></tr></thead><tbody>
-      ${rows.map(r => `<tr><td>${nameOf(r)}</td><td class="r num"><b>${fmtHM(r.sec)}</b></td><td class="r num">${fmtHM(r.bill)}</td><td class="r num">${fmtMoney(r.amt)}</td>
-        <td><div class="row" style="flex-wrap:nowrap"><div class="meter" style="flex:1;margin:0"><span style="width:${total ? r.sec / total * 100 : 0}%"></span></div><span class="small muted num" style="width:36px;text-align:right">${total ? Math.round(r.sec / total * 100) : 0}%</span></div></td></tr>`).join('')}
-      <tr><td><b>Totaal</b></td><td class="r num"><b>${fmtHM(total)}</b></td><td class="r num"><b>${fmtHM(billSec)}</b></td><td class="r num"><b>${fmtMoney(amount)}</b></td><td></td></tr>
-      </tbody></table>${R.group === 'tag' ? '<div class="muted small" style="padding:10px 16px">Registraties met meerdere tags tellen bij elke tag mee.</div>' : ''}` : '<div class="empty">Geen registraties voor deze filters.</div>';
-  } else {
+    const rows = groupRows(entries, R.g1, secOf).map((r, i) => ({ ...r, color: groupColor(R.g1, r.k, i) }));
+    const sub = r => R.g2 ? groupRows(entries.filter(e => groupKeys(e, R.g1).includes(r.k)), R.g2, secOf) : [];
+    const name = (r, g) => g === 'project' ? projLabel(byId(S.projects, r.k)) : g === 'user' && profileOf(r.k) ? `<span class="row" style="flex-wrap:nowrap">${avatar(profileOf(r.k))}${esc(profileOf(r.k).full_name)}</span>` : esc(groupText(r, g));
+    body.innerHTML = `
+      <div class="card-head"><div class="row small"><span class="muted">Groeperen op</span>
+        <select id="r-g1" aria-label="Groeperen op">${groups.map(([k, l]) => `<option value="${k}" ${R.g1 === k ? 'selected' : ''}>${l}</option>`).join('')}</select>
+        <select id="r-g2" aria-label="Daarna op"><option value="">(geen)</option>${groups.filter(g => g[0] !== R.g1).map(([k, l]) => `<option value="${k}" ${R.g2 === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div></div>
+      ${rows.length ? `<div class="sum-split"><div class="table-wrap"><table class="tree"><thead><tr><th>Titel</th><th class="r">Duur</th>${amount > 0 ? '<th class="r">Bedrag</th>' : ''}<th class="r" style="width:70px">%</th></tr></thead><tbody>
+        ${rows.map(r => {
+          const kids = sub(r), open = R.open.has(r.k);
+          return `<tr class="g1"><td>${kids.length ? `<button class="cnt ${open ? 'on' : ''}" data-open="${esc(r.k)}">${kids.length}</button>` : ''}${name(r, R.g1)}</td><td class="r num"><b>${fmtHMS(r.sec)}</b></td>${amount > 0 ? `<td class="r num">${fmtMoney(r.amt)}</td>` : ''}<td class="r num muted">${total ? Math.round(r.sec / total * 100) : 0}%</td></tr>`
+            + (open ? kids.map(c => `<tr class="g2"><td>${name(c, R.g2)}</td><td class="r num">${fmtHMS(c.sec)}</td>${amount > 0 ? `<td class="r num">${fmtMoney(c.amt)}</td>` : ''}<td></td></tr>`).join('') : '');
+        }).join('')}</tbody></table>
+        ${R.g1 === 'tag' || R.g2 === 'tag' ? '<div class="muted small" style="padding:10px 16px">Registraties met meerdere tags tellen bij elke tag mee.</div>' : ''}</div>
+        <div class="donut-wrap">${donut(rows.map(r => ({ name: groupText(r, R.g1), sec: r.sec, color: r.color })), total)}</div></div>`
+      : '<div class="empty">Geen registraties voor deze filters.</div>'}`;
+    $('#r-g1').onchange = e => set({ g1: e.target.value, g2: R.g2 === e.target.value ? '' : R.g2, open: new Set() });
+    $('#r-g2').onchange = e => set({ g2: e.target.value });
+    $$('[data-open]', body).forEach(b => b.onclick = () => { const k = b.dataset.open; R.open.has(k) ? R.open.delete(k) : R.open.add(k); refreshPage(); });
+  } else if (R.tab === 'detailed') {
     const sorted = [...entries].sort((a, b) => entryStart(b) - entryStart(a));
-    tbl.innerHTML = sorted.length ? `<table><thead><tr><th>Datum</th><th>Omschrijving</th><th>Project</th>${isAdmin() ? '<th>Medewerker</th>' : ''}<th>Tijd</th><th class="r">Duur</th><th class="r">Bedrag</th><th></th></tr></thead><tbody>
-      ${sorted.map(e => `<tr data-id="${e.id}"><td class="num">${esc(fmtDate(entryStart(e), { day: '2-digit', month: '2-digit', year: 'numeric' }))}</td>
-        <td>${e.description ? esc(e.description) : '<span class="muted">(geen omschrijving)</span>'}${tagChips(e.tag_ids)}</td><td>${projLabel(projectOf(e))}</td>
+    body.innerHTML = sorted.length ? `<div class="table-wrap"><table><thead><tr><th>Registratie</th>${isAdmin() ? '<th>Medewerker</th>' : ''}<th>Datum</th><th>Tijd</th><th class="r">Duur</th><th></th></tr></thead><tbody>
+      ${sorted.map(e => `<tr data-id="${e.id}"><td>${e.description ? esc(e.description) : '<span class="muted">(geen omschrijving)</span>'}${tagChips(e.tag_ids)}<div class="small">${projLabel(projectOf(e))}</div></td>
         ${isAdmin() ? `<td>${esc(entryUserName(e))}</td>` : ''}
-        <td class="num muted">${hm(entryStart(e))}–${e.end_at ? hm(entryEnd(e)) : 'nu'}</td><td class="r num"><b>${fmtHM(entrySec(e))}</b></td>
-        <td class="r num">${e.billable ? fmtMoney(amountFor(e, entrySec(e))) : '<span class="muted">–</span>'}</td>
+        <td class="num">${esc(fmtDate(entryStart(e), { day: '2-digit', month: '2-digit', year: 'numeric' }))}</td>
+        <td class="num muted">${hm(entryStart(e))} – ${e.end_at ? hm(entryEnd(e)) : 'nu'}</td><td class="r num"><b>${fmtHMS(entrySec(e))}</b></td>
         <td class="r"><button class="btn icon ghost" data-edit aria-label="Bewerken">${icon('edit')}</button></td></tr>`).join('')}
-      </tbody></table>` : '<div class="empty">Geen registraties voor deze filters.</div>';
-    $$('[data-edit]', tbl).forEach(b => b.onclick = () => openEntryModal(entries.find(x => x.id === b.closest('tr').dataset.id)));
+      </tbody></table></div>` : '<div class="empty">Geen registraties voor deze filters.</div>';
+    $$('[data-edit]', body).forEach(b => b.onclick = () => openEntryModal(entries.find(x => x.id === b.closest('tr').dataset.id)));
+  } else {
+    // Wekelijks: rijen per groep, kolommen per dag/week/maand (zelfde indeling als de grafiek)
+    const cols = bk;
+    const rows = groupRows(entries, R.g1, secOf);
+    const cell = (r, c) => entries.filter(e => groupKeys(e, R.g1).includes(r.k)).reduce((t, e) => t + clipSec(e, c.a, c.b), 0);
+    body.innerHTML = `
+      <div class="card-head"><div class="row small"><span class="muted">Rijen per</span><select id="r-g1" aria-label="Rijen per">${groups.filter(g => g[0] !== 'day').map(([k, l]) => `<option value="${k}" ${R.g1 === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div></div>
+      ${rows.length ? `<div class="table-wrap"><table class="weekly"><thead><tr><th>${GROUPS.find(g => g[0] === R.g1)[1]}</th>${cols.map(c => `<th class="r">${esc(c.label)}</th>`).join('')}<th class="r">Totaal</th></tr></thead><tbody>
+        ${rows.map(r => `<tr><td>${R.g1 === 'project' ? projLabel(byId(S.projects, r.k)) : esc(groupText(r, R.g1))}</td>${cols.map(c => { const v = cell(r, c); return `<td class="r num ${v ? '' : 'muted'}">${v ? fmtHM(v) : '–'}</td>`; }).join('')}<td class="r num"><b>${fmtHM(r.sec)}</b></td></tr>`).join('')}
+      </tbody><tfoot><tr><th>Totaal</th>${cols.map(c => `<th class="r num">${fmtHM(entries.reduce((t, e) => t + clipSec(e, c.a, c.b), 0))}</th>`).join('')}<th class="r num">${fmtHM(total)}</th></tr></tfoot></table></div>`
+      : '<div class="empty">Geen registraties voor deze filters.</div>'}`;
+    $('#r-g1').onchange = e => set({ g1: e.target.value === 'day' ? 'project' : e.target.value });
   }
 
-  const set = patch => { Object.assign(R, patch); refreshPage(); };
-  $$('#r-preset button').forEach(b => b.onclick = () => set({ preset: b.dataset.p }));
-  $('#r-from').onchange = e => e.target.value && set({ preset: 'custom', from: e.target.value, to: R.to < e.target.value ? e.target.value : R.to });
-  $('#r-to').onchange = e => e.target.value && set({ preset: 'custom', to: e.target.value, from: R.from > e.target.value ? e.target.value : R.from });
-  if ($('#r-user')) $('#r-user').onchange = e => set({ user: e.target.value });
-  $('#r-client').onchange = e => set({ client: e.target.value });
-  $('#r-project').onchange = e => set({ project: e.target.value });
-  if ($('#r-tag')) $('#r-tag').onchange = e => set({ tag: e.target.value });
+  function set(patch) { Object.assign(R, patch); refreshPage(); }
   $$('#r-tab button').forEach(b => b.onclick = () => set({ tab: b.dataset.t }));
-  if ($('#r-group')) $('#r-group').onchange = e => set({ group: e.target.value });
-  $('#r-csv').onclick = () => exportCsv(entries, from, to);
-  $('#r-pdf').onclick = async () => {
-    const b = $('#r-pdf'); b.disabled = true;
-    try { await exportPdf(entries, from, to); } catch (err) { fail(err); }
-    b.disabled = false;
-  };
+  bindRange(page, from, to, (a, b) => set({ from: a, to: b }));
+  const desc = $('#r-desc');
+  desc.oninput = debounce(() => { R.desc = desc.value.trim(); refreshPage(); setTimeout(() => { const d = $('#r-desc'); d?.focus(); d?.setSelectionRange(d.value.length, d.value.length); }); }, 400);
+  if ($('#r-clear')) $('#r-clear').onclick = () => set({ user: '', client: '', project: '', tag: '', desc: '' });
+  $$('[data-f]', page).forEach(b => b.onclick = () => {
+    const f = b.dataset.f, pick = v => set({ [f]: v || '' });
+    if (f === 'project') return pickProject(b, R.project, pick, { emptyLabel: 'Alle projecten', includeArchived: true });
+    const items = f === 'user' ? S.profiles.map(p => ({ id: p.id, label: p.full_name || p.email }))
+      : f === 'client' ? [{ id: '__none', label: 'Zonder klant' }, ...S.clients.map(c => ({ id: c.id, label: c.name }))]
+      : [{ id: '__none', label: 'Zonder tag' }, ...S.tags.map(t => ({ id: t.id, label: t.name }))];
+    pickFrom(b, items, R[f], pick, { emptyLabel: f === 'user' ? 'Iedereen' : f === 'client' ? 'Alle klanten' : 'Alle tags' });
+  });
+  $('#r-exp').onclick = () => openMenu($('#r-exp'), `<button class="mi" data-x="pdf">${icon('pdf')}Opslaan als PDF</button><button class="mi" data-x="csv">${icon('dl')}Opslaan als CSV (Excel)</button>`, m => {
+    $$('[data-x]', m).forEach(x => x.onclick = async () => {
+      closeMenu();
+      if (x.dataset.x === 'csv') return exportCsv(entries, from, to);
+      try { await exportPdf(entries, from, to); } catch (err) { fail(err); }
+    });
+  });
 }
 
 // Samenvatting: rijen per groep. Per tag telt een registratie met meerdere tags bij elke tag mee.
+function groupKeys(e, group) {
+  return {
+    project: () => [e.project_id || ''], user: () => [e.user_id || 'imp:' + lc(e.import_email)], client: () => [projectOf(e)?.client_id || ''],
+    tag: () => e.tag_ids?.length ? e.tag_ids : [''],
+    day: () => [ymd(entryStart(e))], description: () => [e.description.trim().toLowerCase()]
+  }[group]();
+}
 function groupRows(entries, group, secOf) {
-  const keysOf = {
-    project: e => [e.project_id || ''], user: e => [e.user_id || 'imp:' + lc(e.import_email)], client: e => [projectOf(e)?.client_id || ''],
-    tag: e => e.tag_ids?.length ? e.tag_ids : [''],
-    day: e => [ymd(entryStart(e))], description: e => [e.description.trim().toLowerCase()]
-  }[group];
   const g = new Map();
-  for (const e of entries) for (const k of keysOf(e)) {
+  for (const e of entries) for (const k of groupKeys(e, group)) {
     const row = g.get(k) || { k, sample: e, sec: 0, bill: 0, amt: 0, n: 0 };
     const s = secOf(e);
     row.sec += s; row.bill += e.billable ? s : 0; row.amt += amountFor(e, s); row.n++;
@@ -1152,8 +1304,9 @@ async function exportPdf(entries, from, to) {
   const R = S.rep, doc = new window.jspdf.jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
   const secOf = e => clipSec(e, from, to);
   const total = entries.reduce((a, e) => a + secOf(e), 0);
-  const groupLabel = GROUPS.find(x => x[0] === R.group)[1];
+  const groupLabel = GROUPS.find(x => x[0] === R.g1)[1];
   const filters = [
+    R.desc && `Omschrijving bevat: ${R.desc}`,
     R.user && `Medewerker: ${profileOf(R.user)?.full_name || ''}`, R.client && `Klant: ${byId(S.clients, R.client)?.name || ''}`,
     R.project && `Project: ${byId(S.projects, R.project)?.name || ''}`,
     R.tag && `Tag: ${R.tag === '__none' ? 'zonder tag' : byId(S.tags, R.tag)?.name || ''}`
@@ -1170,7 +1323,7 @@ async function exportPdf(entries, from, to) {
   doc.autoTable({
     startY: 35, head: [[`Per ${groupLabel.toLowerCase()}`, 'Uren', 'Aandeel']], styles: style, headStyles: head,
     columnStyles: { 1: { halign: 'right', cellWidth: 25 }, 2: { halign: 'right', cellWidth: 22 } },
-    body: [...groupRows(entries, R.group, secOf).map(r => [groupText(r, R.group), fmtHM(r.sec), `${total ? Math.round(r.sec / total * 100) : 0}%`]), ['Totaal', fmtHM(total), '']],
+    body: [...groupRows(entries, R.g1, secOf).map(r => [groupText(r, R.g1), fmtHM(r.sec), `${total ? Math.round(r.sec / total * 100) : 0}%`]), ['Totaal', fmtHM(total), '']],
     didParseCell: c => {
       if (c.section === 'head' && c.column.index > 0) c.cell.styles.halign = 'right';
       if (c.section === 'body' && c.row.index === c.table.body.length - 1) c.cell.styles.fontStyle = 'bold';
@@ -1245,7 +1398,8 @@ async function renderProjects(page) {
   $('#p-client').onchange = e => { P.client = e.target.value; refreshPage(); };
   $$('#p-status button').forEach(b => b.onclick = () => { P.status = b.dataset.s; refreshPage(); });
   $$('[data-rep]').forEach(a => a.onclick = ev => {
-    Object.assign(S.rep, { project: a.closest('tr').dataset.id, client: '', preset: 'year', tab: 'summary', group: isAdmin() ? 'user' : 'day' });
+    const [from, to] = rangeOf('year');
+    Object.assign(S.rep, { project: a.closest('tr').dataset.id, client: '', tag: '', desc: '', from, to, tab: 'summary', g1: isAdmin() ? 'user' : 'day', g2: '' });
   });
   if (isAdmin()) {
     $('#p-new').onclick = () => openProjectModal(null);
@@ -1389,56 +1543,97 @@ function openClientModal(c) {
 // =====================================================================
 // Team
 // =====================================================================
-function relTime(d) {
-  const min = Math.round((Date.now() - d) / 60000);
-  if (min < 1) return 'zonet';
-  if (min < 60) return `${min} min geleden`;
-  const h = Math.round(min / 60);
-  if (h < 24) return `${h} u geleden`;
-  const days = Math.round(h / 24);
-  return days === 1 ? 'gisteren' : `${days} dagen geleden`;
-}
-
 async function renderTeam(page) {
-  const wk = startOfWeek(new Date());
-  const { data, error } = await sb.rpc('team_summary', { week_start: wk.toISOString() });
-  if (error) throw error;
+  const T = S.team;
+  const [sum, un] = await Promise.all([
+    sb.rpc('team_summary', { week_start: startOfWeek(new Date()).toISOString() }),
+    isAdmin() && S.tagsReady ? sb.rpc('unclaimed_imports') : Promise.resolve({ data: [] })
+  ]);
+  if (sum.error) throw sum.error;
   if (S.view !== 'team') return;
-  const sum = new Map(data.map(r => [r.user_id, r]));
-  const members = [...S.profiles].sort((a, b) => (b.active - a.active) || (a.full_name || a.email).localeCompare(b.full_name || b.email));
-  const teamWeek = data.reduce((a, r) => a + Number(r.week_seconds), 0);
-  const liveCount = data.filter(r => r.running_since).length;
-  const link = location.origin + location.pathname;
+  const live = new Map(sum.data.filter(r => r.running_since).map(r => [r.user_id, r]));
+  const q = T.q.toLowerCase();
+  const match = (name, email) => !q || `${name} ${email}`.toLowerCase().includes(q);
+  const members = [...S.profiles]
+    .filter(p => T.status === 'all' || (T.status === 'active') === p.active)
+    .filter(p => !T.role || p.role === T.role)
+    .filter(p => match(p.full_name, p.email))
+    .sort((a, b) => (a.full_name || a.email).localeCompare(b.full_name || b.email));
+  // Wie nog geen account heeft maar wel uren uit Clockify (wordt gekoppeld bij registratie)
+  const pending = (un.error ? [] : un.data || []).filter(r => T.status !== 'inactive' && !T.role && match(r.import_name || '', r.import_email));
+  const roleTag = p => `<span class="tag ${p.role === 'admin' ? 'admin' : ''}">${p.role === 'admin' ? 'Beheerder' : 'Medewerker'}</span>`;
 
   page.innerHTML = `
-    <div class="page-head"><div><h1>Team</h1><div class="muted">${members.filter(m => m.active).length} actieve leden · week ${weekNumber(wk)}</div></div></div>
-    <div class="tiles">
-      <div class="card tile"><div class="label">Teamuren deze week</div><div class="value num">${fmtHM(teamWeek)}</div></div>
-      <div class="card tile"><div class="label">Nu aan het werk</div><div class="value num">${liveCount}</div><div class="sub">lopende timers</div></div>
-      <div class="card tile"><div class="label">Gemiddeld per lid</div><div class="value num">${fmtHM(teamWeek / Math.max(1, members.filter(m => m.active).length))}</div></div>
-      <div class="card tile"><div class="label">Beheerders</div><div class="value num">${members.filter(m => m.role === 'admin').length}</div></div>
+    <div class="page-head"><h1>Team</h1>${isAdmin() ? `<button class="btn primary" id="tm-add">${icon('plus')}Nieuw lid toevoegen</button>` : ''}</div>
+    <div class="card filterbar">
+      <span class="flabel">Filter</span>
+      <select id="tm-status" aria-label="Status"><option value="active">Actief</option><option value="inactive" ${T.status === 'inactive' ? 'selected' : ''}>Gedeactiveerd</option><option value="all" ${T.status === 'all' ? 'selected' : ''}>Alle</option></select>
+      <select id="tm-role" aria-label="Rol"><option value="">Alle rollen</option><option value="admin" ${T.role === 'admin' ? 'selected' : ''}>Beheerder</option><option value="member" ${T.role === 'member' ? 'selected' : ''}>Medewerker</option></select>
+      <input id="tm-q" placeholder="Zoek op naam of e-mail" value="${esc(T.q)}" style="margin-left:auto;min-width:220px" aria-label="Zoeken">
     </div>
-    <div class="card table-wrap"><table>
-      <thead><tr><th>Lid</th><th>Status</th><th style="width:24%">Deze week</th>${isAdmin() ? '<th class="r">Uurtarief</th><th></th>' : ''}</tr></thead>
-      <tbody>${members.map(p => {
-        const r = sum.get(p.id) || {}, sec = Number(r.week_seconds || 0), target = Number(p.weekly_target || 0) * 3600, pj = byId(S.projects, r.running_project);
+    <div class="card table-wrap">
+      <div class="card-head"><span class="muted small">Leden</span><span class="muted small">${members.length + pending.length}</span></div>
+      ${members.length || pending.length ? `<table><thead><tr><th>Naam</th><th>E-mail</th>${isAdmin() ? `<th>Uurtarief (${esc(CFG.CURRENCY || 'EUR')})</th>` : ''}<th>Rol</th>${isAdmin() ? '<th></th>' : ''}</tr></thead><tbody>
+      ${members.map(p => {
+        const l = live.get(p.id), pj = l && byId(S.projects, l.running_project);
         return `<tr data-id="${p.id}">
-          <td><span class="row" style="flex-wrap:nowrap">${avatar(p)}<span><b>${esc(p.full_name || p.email)}</b> ${p.role === 'admin' ? '<span class="tag admin">beheerder</span>' : ''} ${p.active ? '' : '<span class="tag off">gedeactiveerd</span>'}<br><span class="muted small">${esc(p.email)}</span></span></span></td>
-          <td>${r.running_since ? `<span class="tag live">● aan het werk</span> <span class="small">${pj ? esc(pj.name) : ''} sinds ${hm(new Date(r.running_since))}</span>` : `<span class="muted small">${r.last_activity ? 'laatst actief ' + relTime(new Date(r.last_activity)) : 'nog geen registraties'}</span>`}</td>
-          <td><div class="small num"><b>${fmtHM(sec)}</b>${target ? ` <span class="muted">/ ${fmtHM(target)}</span>` : ''}</div>${target ? `<div class="meter ${sec > target ? 'over' : ''}" style="margin-top:4px"><span style="width:${Math.min(100, sec / target * 100)}%"></span></div>` : ''}</td>
-          ${isAdmin() ? `<td class="r num">${fmtMoney(Number(p.hourly_rate || 0))}</td><td class="r" style="white-space:nowrap"><a class="btn icon ghost" href="#reports" data-rep title="Rapport" aria-label="Rapport">${icon('rep')}</a><button class="btn icon ghost" data-edit aria-label="Bewerken">${icon('edit')}</button></td>` : ''}
+          <td><span class="row" style="flex-wrap:nowrap">${avatar(p)}<span>${esc(p.full_name || p.email)}${p.id === S.me.id ? ' <span class="muted">(jij)</span>' : ''}
+            ${l ? `<br><span class="tag live" title="Sinds ${hm(new Date(l.running_since))}">● aan het werk${pj ? ' · ' + esc(pj.name) : ''}</span>` : ''}${p.active ? '' : ' <span class="tag off">gedeactiveerd</span>'}</span></span></td>
+          <td>${esc(p.email)}</td>
+          ${isAdmin() ? `<td><span class="rate"><span class="num">${Number(p.hourly_rate) ? fmtMoney(Number(p.hourly_rate)) : '–'}</span><button class="linkbtn" data-rate>Wijzig</button></span></td>` : ''}
+          <td>${isAdmin() && p.id !== S.me.id ? `<button class="rolebtn" data-role>${roleTag(p)}</button>` : roleTag(p)}</td>
+          ${isAdmin() ? `<td class="r"><button class="btn icon ghost" data-more aria-label="Meer">${icon('dots')}</button></td>` : ''}
         </tr>`;
-      }).join('')}</tbody></table></div>
-    <div class="card"><div class="card-head"><h2>Collega's uitnodigen</h2></div><div class="card-body">
-      <p style="margin-top:0">Deel deze link. Nieuwe collega's maken zelf een account en verschijnen dan hier als medewerker.${CFG.ALLOWED_EMAIL_DOMAIN ? ` Enkel adressen van <b>@${esc(CFG.ALLOWED_EMAIL_DOMAIN)}</b> kunnen registreren.` : ''}</p>
-      <div class="row"><input readonly value="${esc(link)}" style="flex:1;min-width:200px" id="t-link"><button class="btn" id="t-copy">Kopiëren</button></div>
-    </div></div>`;
+      }).join('')}
+      ${pending.map(r => `<tr><td><span class="row" style="flex-wrap:nowrap">${avatar({ id: r.import_email, full_name: r.import_name })}<span>${esc(r.import_name || r.import_email)}<br><span class="muted small">${r.entries} geïmporteerde registraties</span></span></span></td>
+        <td>${esc(r.import_email)}</td>${isAdmin() ? '<td class="muted">–</td>' : ''}<td><span class="tag">Nog geen account</span></td>${isAdmin() ? '<td></td>' : ''}</tr>`).join('')}
+      </tbody></table>` : '<div class="empty">Geen leden gevonden.</div>'}
+    </div>`;
 
-  $('#t-copy').onclick = async () => { try { await navigator.clipboard.writeText(link); toast('Link gekopieerd'); } catch (_) { $('#t-link').select(); } };
-  if (isAdmin()) {
-    $$('[data-edit]').forEach(b => b.onclick = () => openMemberModal(profileOf(b.closest('tr').dataset.id)));
-    $$('[data-rep]').forEach(a => a.onclick = () => Object.assign(S.rep, { user: a.closest('tr').dataset.id, project: '', client: '', group: 'project', tab: 'summary' }));
-  }
+  const set = patch => { Object.assign(T, patch); refreshPage(); };
+  $('#tm-status').onchange = e => set({ status: e.target.value });
+  $('#tm-role').onchange = e => set({ role: e.target.value });
+  const qi = $('#tm-q');
+  qi.oninput = debounce(() => { T.q = qi.value.trim(); refreshPage(); setTimeout(() => { const x = $('#tm-q'); x?.focus(); x?.setSelectionRange(x.value.length, x.value.length); }); }, 300);
+  if (!isAdmin()) return;
+  $('#tm-add').onclick = openInviteModal;
+  const saveProfile = async (p, patch) => {
+    const { data, error } = await sb.from('profiles').update(patch).eq('id', p.id).select().single();
+    if (error) return fail(error);
+    Object.assign(p, data); refreshPage();
+  };
+  $$('tr[data-id]', page).forEach(tr => {
+    const p = profileOf(tr.dataset.id);
+    const rb = $('[data-rate]', tr);
+    if (rb) rb.onclick = () => openMenu(rb, `<div style="padding:8px;display:flex;gap:6px"><input type="number" min="0" step="0.01" value="${Number(p.hourly_rate) || ''}" placeholder="0,00" style="width:110px" aria-label="Uurtarief"><button class="btn primary">Opslaan</button></div>`, m => {
+      const inp = $('input', m), go = () => { closeMenu(); saveProfile(p, { hourly_rate: Number(inp.value || 0) }); };
+      $('button', m).onclick = go; inp.onkeydown = e => { if (e.key === 'Enter') go(); };
+    });
+    const ro = $('[data-role]', tr);
+    if (ro) ro.onclick = () => openMenu(ro, `<button class="mi ${p.role === 'admin' ? 'on' : ''}" data-v="admin">Beheerder</button><button class="mi ${p.role === 'member' ? 'on' : ''}" data-v="member">Medewerker</button>`, m => {
+      $$('[data-v]', m).forEach(x => x.onclick = () => { closeMenu(); if (x.dataset.v !== p.role) saveProfile(p, { role: x.dataset.v }); });
+    });
+    const mo = $('[data-more]', tr);
+    mo.onclick = () => openMenu(mo, `<button class="mi" data-m="edit">Bewerken</button><button class="mi" data-m="rep">Rapport bekijken</button>${p.id !== S.me.id ? `<button class="mi ${p.active ? 'danger' : ''}" data-m="act">${p.active ? 'Deactiveren' : 'Activeren'}</button>` : ''}`, m => {
+      $$('[data-m]', m).forEach(x => x.onclick = () => {
+        closeMenu();
+        if (x.dataset.m === 'edit') return openMemberModal(p);
+        if (x.dataset.m === 'rep') { Object.assign(S.rep, { user: p.id, project: '', client: '', tag: '', desc: '', g1: 'project', tab: 'summary' }); location.hash = 'reports'; return; }
+        if (p.active && !confirm(`${p.full_name || p.email} deactiveren? Die persoon kan dan niet meer inloggen om uren te registreren.`)) return;
+        saveProfile(p, { active: !p.active });
+      });
+    });
+  });
+}
+
+function openInviteModal() {
+  const link = location.origin + location.pathname, dom = (CFG.ALLOWED_EMAIL_DOMAIN || '').trim();
+  openModal('Nieuw lid toevoegen', `
+    <p style="margin:0">Stuur deze link naar je collega. Die maakt zelf een account met ${dom ? `een <b>@${esc(dom)}</b>-adres` : 'zijn of haar e-mailadres'} en verschijnt daarna hier als medewerker.</p>
+    <div class="row"><input readonly value="${esc(link)}" style="flex:1;min-width:200px" id="inv-link"><button class="btn" id="inv-copy">Kopiëren</button></div>
+    <p class="muted small" style="margin:0">Uren uit Clockify worden automatisch aan het account gekoppeld als je collega hetzelfde e-mailadres gebruikt als in Clockify.</p>`,
+    `<div></div><button class="btn primary" data-close>Klaar</button>`);
+  $('#inv-copy').onclick = async () => { try { await navigator.clipboard.writeText(link); toast('Link gekopieerd'); } catch (_) { $('#inv-link').select(); } };
 }
 
 function openMemberModal(p) {
