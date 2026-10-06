@@ -1265,10 +1265,14 @@ function parseCsv(text) {
 const IMP_COLS = {
   project: ['project', 'projectnaam', 'name', 'naam'], client: ['client', 'klant'],
   description: ['description', 'beschrijving', 'omschrijving'], user: ['user', 'gebruiker', 'medewerker'],
-  email: ['email'], tags: ['tags', 'tag'], billable: ['billable', 'factureerbaar'],
+  email: ['email'], tags: ['tags', 'tag'], billable: ['billable', 'billability', 'factureerbaar'],
   sdate: ['startdate', 'startdatum'], stime: ['starttime', 'starttijd'], edate: ['enddate', 'einddatum'], etime: ['endtime', 'eindtijd'],
-  dur: ['durationdecimal', 'duurdecimaal']
+  dur: ['durationdecimal', 'duurdecimaal'],
+  // Enkel in de projectexport
+  tracked: ['trackedh', 'geregistreerdu'], estimate: ['estimatedh', 'geschatu'], rate: ['billablerateeur', 'billablerate', 'uurtarief']
 };
+// Clockify schrijft soms "(Without client)" e.d. in plaats van een leeg veld
+const impVal = v => /^\((without|zonder) [^)]*\)$/i.test(v) ? '' : v;
 const lc = v => String(v ?? '').trim().toLowerCase();
 const isYes = v => /^(yes|ja|true|1|y|j)$/i.test(String(v).trim());
 
@@ -1287,17 +1291,26 @@ function analyzeImport(files) {
     const rows = parseCsv(file.text);
     const norm = (rows[0] || []).map(h => lc(h).replace(/[^a-z]/g, ''));
     const ix = Object.fromEntries(Object.entries(IMP_COLS).map(([k, names]) => [k, norm.findIndex(h => names.includes(h))]));
-    const get = (r, k) => ix[k] >= 0 ? String(r[ix[k]] ?? '').trim() : '';
+    const get = (r, k) => ix[k] >= 0 ? impVal(String(r[ix[k]] ?? '').trim()) : '';
+    const num = v => v === '' ? null : Number(v.replace(',', '.')) || null;
     const isReport = ix.sdate >= 0 && ix.stime >= 0;
     if (!isReport && ix.project < 0) { A.files.push({ name: file.name, kind: 'onbekend', n: 0 }); A.errors.push(`${file.name}: kolommen niet herkend (verwacht een Clockify-export).`); continue; }
-    A.files.push({ name: file.name, kind: isReport ? 'registraties' : 'projectlijst', n: rows.length - 1 });
+    // Een samenvattend rapport heeft geen datums: daaruit komen enkel projecten en klanten
+    const kind = isReport ? 'registraties' : ix.tracked >= 0 ? 'projectlijst' : 'enkel projecten, geen registraties';
+    if (!isReport && ix.tracked < 0) A.summaryOnly = true;
+    A.files.push({ name: file.name, kind, n: rows.length - 1 });
     rows.slice(1).forEach((r, i) => {
       const o = { line: i + 2, file: file.name, project: get(r, 'project'), client: get(r, 'client'), billable: ix.billable < 0 || isYes(get(r, 'billable')) };
       if (o.client) A.clients.set(lc(o.client), o.client);
       if (o.project) {
-        const k = lc(o.project) + '|' + lc(o.client), p = A.projects.get(k);
-        if (!p) A.projects.set(k, { name: o.project, client: o.client, billable: o.billable });
-        else if (isReport && o.billable) p.billable = true;
+        const k = lc(o.project) + '|' + lc(o.client), p = A.projects.get(k) || { name: o.project, client: o.client, billable: o.billable };
+        if (isReport) { if (o.billable) p.billable = true; }
+        else if (ix.tracked >= 0) {
+          // Projectlijst: instellingen overnemen en Clockify-totaal bijhouden om te controleren of alle uren mee zijn
+          Object.assign(p, { billable: o.billable, budget_hours: num(get(r, 'estimate')), hourly_rate: num(get(r, 'rate')) });
+          A.trackedSec = (A.trackedSec || 0) + (num(get(r, 'tracked')) || 0) * 3600;
+        }
+        A.projects.set(k, p);
       }
       if (!isReport) return;
       Object.assign(o, { description: get(r, 'description'), user: get(r, 'user'), email: get(r, 'email'), sdate: get(r, 'sdate'), stime: get(r, 'stime'), edate: get(r, 'edate'), etime: get(r, 'etime'), dur: get(r, 'dur') });
@@ -1412,6 +1425,11 @@ function renderImportPreview(el, A) {
         ${list('nieuwe klanten', plan.newClients)}
         ${list('nieuwe projecten', plan.newProjects.map(p => p.name + (p.client ? ' · ' + p.client : '')))}
         ${list('nieuwe tags', plan.newTags)}
+        ${A.trackedSec ? (() => {
+          const sec = A.entries.reduce((t, e) => t + (e.end - e.start) / 1000, 0), pct = sec / A.trackedSec * 100;
+          return `<div class="card-body ${pct < 98 ? 'notice' : ''}" style="border-radius:var(--r-sm)">Volgens de projectlijst staat er in Clockify <b>${fmtHM(A.trackedSec)}</b> uur. De registraties in je bestanden zijn samen <b>${fmtHM(sec)}</b> uur (${Math.round(pct)}%).${pct < 98 ? ' Er ontbreken dus nog registraties: exporteer in Clockify het gedetailleerde rapport over een langere periode (of per jaar) en kies alle bestanden samen.' : ' Alles lijkt mee te zijn.'}</div>`;
+        })() : ''}
+        ${A.summaryOnly ? '<div class="card-body notice" style="border-radius:var(--r-sm)">Een <b>samenvattend</b> rapport bevat geen afzonderlijke registraties. Gebruik voor de uren <i>Reports → Detailed</i>.</div>' : ''}
         ${A.dupes ? `<div class="muted small">${A.dupes} dubbele regels in de bestanden worden maar één keer geteld.</div>` : ''}
         ${A.errors.length ? `<details class="notice"><summary><b>${A.errors.length}</b> regels kunnen niet gelezen worden en worden overgeslagen</summary><ul class="small">${A.errors.slice(0, 50).map(x => `<li>${esc(x)}</li>`).join('')}</ul></details>` : ''}
         <div class="muted small">Alle projecten worden als <b>actief</b> aangemaakt, zodat je ook op oude projecten verder kan werken. Archiveren kan nadien op de pagina Projecten. Uurtarieven, budgetten en weekdoelen stel je daarna zelf in.</div>
@@ -1449,7 +1467,8 @@ async function runImport(A, progress) {
   progress('Projecten aanmaken…');
   let ci = S.projects.length;
   S.projects.push(...await ins('projects', plan.newProjects.map(p => ({
-    name: p.name, client_id: clientId.get(lc(p.client)) || null, billable: p.billable, color: PROJECT_COLORS[ci++ % PROJECT_COLORS.length]
+    name: p.name, client_id: clientId.get(lc(p.client)) || null, billable: p.billable, color: PROJECT_COLORS[ci++ % PROJECT_COLORS.length],
+    budget_hours: p.budget_hours ?? null, hourly_rate: p.hourly_rate ?? null
   }))));
   const projectId = new Map(S.projects.map(p => [lc(p.name) + '|' + lc(clientOf(p)?.name), p.id]));
   progress('Tags aanmaken…');

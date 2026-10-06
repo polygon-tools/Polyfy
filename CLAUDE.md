@@ -15,7 +15,7 @@ Taal van de UI, commits en communicatie: **Nederlands (Vlaams)**.
 - Kalender: weekweergave, klik leeg vak = toevoegen, klik blok = bewerken; admin kan collega kiezen.
 - Rapporten: periodes + filters (medewerker, klant, project, tag, factureerbaar), samenvatting per project/medewerker/klant/tag/dag/omschrijving, gedetailleerde lijst, bedragen, CSV-export (`;`-gescheiden, BOM, voor Excel).
 - Projecten & klanten: kleur, uurtarief, budget-uren met voortgang, archiveren. Tags beheren (iedereen mag tags maken, admins wijzigen/verwijderen).
-- Importeren (admin): Clockify-CSV (gedetailleerd rapport en/of projectlijst) → klanten, projecten, tags, registraties. Medewerkers koppelen op e-mail/naam; dubbels vermeden via `time_entries.source_ref` (unieke index, upsert met ignoreDuplicates).
+- Importeren (admin): Clockify-CSV (gedetailleerd rapport en/of projectlijst) → klanten, projecten, tags, registraties. Projectexport levert ook budget (Estimated), tarief en factureerbaar, en het Clockify-totaal (Tracked) waarmee de importpagina controleert of alle registraties mee zijn. Samenvattend rapport = enkel projecten. Medewerkers koppelen op e-mail/naam; dubbels vermeden via `time_entries.source_ref` (unieke index, upsert met ignoreDuplicates).
 - Team: weekuren vs doel, live status, rollen, tarieven, deactiveren, uitnodigingslink.
 
 ## Datamodel & rechten
