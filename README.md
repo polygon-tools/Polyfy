@@ -2,13 +2,14 @@
 
 Interne urenregistratie (alternatief voor Clockify) — statische website + Supabase.
 
-**Functies**
-- **Timer** bovenaan elke pagina: omschrijving, project, tags, factureerbaar (€), start/stop. Of registreer manueel.
+**Functies** (paginanamen zoals in Clockify)
+- **Time Tracker**: timer met omschrijving, project, tags, factureerbaar (€), start/stop, of registreer manueel. Daaronder je registraties per week.
+- **Timesheet**: weekoverzicht per project; vul de uren per dag rechtstreeks in.
 - **Dashboard**: uren vandaag / deze week (t.o.v. weekdoel) / deze maand, % factureerbaar, grafiek per dag, verdeling per project, recente registraties (opnieuw starten, bewerken, verwijderen). Beheerders zien wie er nu aan het werk is.
-- **Kalender**: weekweergave; klik op een leeg vak om uren toe te voegen, klik op een blok om te bewerken. Beheerders kunnen de kalender van elke collega bekijken.
-- **Rapporten**: periode (deze week, vorige maand, aangepast…), filters op medewerker, klant, project, tag en factureerbaar. Samenvatting gegroepeerd op project / medewerker / klant / tag / dag / omschrijving, gedetailleerde lijst, bedragen, en **CSV-export** (opent in Excel).
-- **Projecten**: klanten, kleur, uurtarief, budget in uren met voortgangsbalk, archiveren. Tags beheren.
-- **Importeren** (beheerders): registraties, projecten, klanten en tags overzetten uit een Clockify-export (CSV).
+- **Calendar**: weekweergave; klik op een leeg vak om uren toe te voegen, klik op een blok om te bewerken. Beheerders kunnen de kalender van elke collega bekijken.
+- **Reports**: periode (deze week, vorige maand, aangepast…), filters op medewerker, klant, project en tag. Samenvatting gegroepeerd op project / medewerker / klant / tag / dag / omschrijving, gedetailleerde lijst, bedragen, en export als **PDF** of **CSV** (opent in Excel).
+- **Projects**: zoeken, filteren per klant, kleur, archiveren. **Clients** en **Tags** hebben elk een eigen pagina.
+- **Import** (beheerders): registraties, projecten, klanten en tags overzetten uit een Clockify-export (CSV).
 - **Team**: uren deze week t.o.v. weekdoel, wie nu werkt, rollen, uurtarieven, accounts deactiveren, uitnodigingslink.
 
 **Rechten**
