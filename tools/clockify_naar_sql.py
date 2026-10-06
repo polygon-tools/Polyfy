@@ -1,5 +1,5 @@
 # Zet Clockify-exports (gedetailleerd rapport + projectexport) om naar één SQL-bestand voor de Supabase SQL Editor.
-# Gebruik: python3 tools/clockify_naar_sql.py uit.sql supabase/schema-v2-*.sql … supabase/schema-v5-*.sql export1.csv [export2.csv …]
+# Gebruik: python3 tools/clockify_naar_sql.py uit.sql (→ uit-1-van-N.sql, uit-2-van-N.sql, …) supabase/schema-v2-*.sql … supabase/schema-v5-*.sql export1.csv [export2.csv …]
 # Alle opgegeven .sql-bestanden (database-updates) komen in volgorde vooraan, zodat de eindtoestand klopt.
 # Zelfde regels als renderImport in app.js (kolommen, "(Without …)", datumvolgorde, source_ref), dus geen dubbels met de importpagina.
 # Het resultaat bevat persoonsgegevens: NIET in de repo zetten.
@@ -64,7 +64,7 @@ def to_dt(d, t):
     return datetime(y + 2000 if y < 100 else y, mo, dd, h, int(m.group(2)), int(m.group(3) or 0), tzinfo=TZ)
 iso = lambda d: d.astimezone(timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.') + f'{d.microsecond // 1000:03d}Z'
 
-entries, refs, skipped = [], set(), {}
+entries, refs = [], set()
 for o in raw:
     start = to_dt(o['sdate'], o['stime'])
     end = to_dt(o['edate'] or o['sdate'], o['etime']) if o['etime'] else start + timedelta(hours=num(o['dur']) or 0)
@@ -73,28 +73,38 @@ for o in raw:
     ref = '|'.join(['clockify', ukey, iso(start), iso(end), lc(o['project']), lc(o['description'])])
     if ref in refs: continue
     refs.add(ref)
-    if re.match(r'^deleteduser', o['user'], re.I):  # verwijderde Clockify-gebruiker: niet importeren (zoals op de importpagina)
-        skipped[o['user']] = skipped.get(o['user'], 0) + 1; continue
-    entries.append((lc(o['email']), o['user'].strip(), o['project'], o['client'], o['description'], o['tags'], o['billable'], iso(start), iso(end), ref))
+    entries.append([lc(o['email']), o['user'].strip(), o['project'], o['client'], o['description'], o['tags'], o['billable'], iso(start), iso(end), ref])
+
+# Verwijderde Clockify-gebruikers (vroegere medewerkers): toch importeren zodat de projecttotalen kloppen,
+# als "Former employee 1, 2, …" (meeste registraties eerst). Hun nep-adres kan nooit een account krijgen.
+deleted = [e for e, _ in __import__('collections').Counter(x[0] for x in entries if re.match(r'^deleteduser', x[1], re.I)).most_common()]
+for x in entries:
+    if x[0] in deleted: x[1] = f'Former employee {deleted.index(x[0]) + 1}'
 
 def values(rows, fmt):
     return ',\n'.join(fmt(r) for r in rows)
 
-sql = [f"""-- =====================================================================
--- Polyfy - volledige import uit Clockify (gegenereerd)
--- Plak dit volledige bestand in Supabase > SQL Editor en klik Run.
--- Bevat: de database-updates (v2 t.e.m. de laatste) en de data.
+CHUNK = 3000  # registraties per bestand, zodat de SQL Editor het aankan
+nparts = 1 + (len(entries) + CHUNK - 1) // CHUNK
+base = out_path[:-4] if out_path.endswith('.sql') else out_path
+names = [f'{base}-{i + 1}-van-{nparts}.sql' for i in range(nparts)]
+header = lambda i, what: f"""-- =====================================================================
+-- Polyfy - import uit Clockify (gegenereerd), deel {i} van {nparts}: {what}
+-- Voer de delen in volgorde uit in Supabase > SQL Editor (telkens alles plakken en Run).
 -- Opnieuw uitvoeren mag: wat er al is wordt overgeslagen.
--- Inhoud: {len(clients)} klanten, {len(projects)} projecten, {len(tags)} tags, {len(entries)} registraties.
 -- =====================================================================
-""", *[open(f).read() for f in schemas], f"""
+"""
+control = """
+-- Controle
+select (select count(*) from public.projects) as projecten, (select count(*) from public.clients) as klanten,
+       (select count(*) from public.tags) as tags, (select count(*) from public.time_entries) as registraties,
+       (select count(*) from public.time_entries where user_id is null) as zonder_account;
+"""
+part1 = [header(1, f'database-updates, {len(clients)} klanten, {len(projects)} projecten, {len(tags)} tags'), *[open(f).read() for f in schemas], f"""
 -- =====================================================================
--- Data
+-- Klanten, projecten, tags
 -- =====================================================================
 begin;
--- Laat de eigenaarscontrole toe dat de SQL Editor uren voor anderen invoegt
-select set_config('polyfy.claiming', '1', true);
-
 create temp table imp_clients (name text) on commit drop;
 insert into imp_clients values
 {values(clients.values(), lambda n: f'({q(n)})')};
@@ -110,16 +120,24 @@ insert into public.projects (name, client_id, billable, budget_hours, hourly_rat
   from imp_projects i
   where not exists (select 1 from public.projects p left join public.clients pc on pc.id = p.client_id
                     where lower(p.name) = lower(i.name) and lower(coalesce(pc.name, '')) = lower(coalesce(i.client, '')));
-
+""" + (f"""
 insert into public.tags (name) values
 {values(tags.values(), lambda n: f'({q(n)})')}
 on conflict do nothing;
-
+""" if tags else '') + "commit;\n" + control]
+out = ['\n'.join(part1)]
+fmt = lambda e: f"({q(e[0])}, {q(e[1])}, {q(e[2] or None)}, {q(e[3] or None)}, {q(e[4])}, {q('{' + ','.join(chr(34) + t.replace(chr(92), chr(92)*2).replace(chr(34), chr(92)+chr(34)) + chr(34) for t in e[5]) + '}')}, {str(e[6]).lower()}, {q(e[7])}, {q(e[8])}, {q(e[9])})"
+for i in range(nparts - 1):
+    chunk = entries[i * CHUNK:(i + 1) * CHUNK]
+    out.append(header(i + 2, f'registraties {i * CHUNK + 1} t.e.m. {i * CHUNK + len(chunk)}') + f"""
+begin;
+-- Laat de eigenaarscontrole toe dat de SQL Editor uren voor anderen invoegt
+select set_config('polyfy.claiming', '1', true);
 create temp table imp_entries (email text, name text, project text, client text, description text, tags text[], billable boolean, start_at timestamptz, end_at timestamptz, ref text) on commit drop;
 insert into imp_entries values
-{values(entries, lambda e: f"({q(e[0])}, {q(e[1])}, {q(e[2] or None)}, {q(e[3] or None)}, {q(e[4])}, {q('{' + ','.join(chr(34) + t.replace(chr(92), chr(92)*2).replace(chr(34), chr(92)+chr(34)) + chr(34) for t in e[5]) + '}')}, {str(e[6]).lower()}, {q(e[7])}, {q(e[8])}, {q(e[9])})")};
+{values(chunk, fmt)};
 
--- Wie al een account heeft krijgt de uren meteen; anders wachten ze op een account met dat e-mailadres
+-- Wie al een (bevestigd) account heeft krijgt de uren meteen; anders worden ze gekoppeld zodra die persoon inlogt
 insert into public.time_entries (user_id, import_email, import_name, project_id, description, billable, start_at, end_at, tag_ids, source_ref)
   select pr.id, case when pr.id is null then i.email end, case when pr.id is null then i.name end,
     (select p.id from public.projects p left join public.clients pc on pc.id = p.client_id
@@ -133,12 +151,8 @@ insert into public.time_entries (user_id, import_email, import_name, project_id,
 
 select set_config('polyfy.claiming', '', true);
 commit;
-
--- Controle
-select (select count(*) from public.projects) as projecten, (select count(*) from public.clients) as klanten,
-       (select count(*) from public.tags) as tags, (select count(*) from public.time_entries) as registraties,
-       (select count(*) from public.time_entries where user_id is null) as wachten_op_account;
-"""]
-open(out_path, 'w').write('\n'.join(sql))
+""" + control)
+for n, txt in zip(names, out): open(n, 'w').write(txt)
 hours = sum((datetime.fromisoformat(e[8].replace('Z', '+00:00')) - datetime.fromisoformat(e[7].replace('Z', '+00:00'))).total_seconds() for e in entries) / 3600
-print(f'{len(clients)} klanten, {len(projects)} projecten, {len(tags)} tags, {len(entries)} registraties ({hours:.1f} u), overgeslagen: {skipped}, clockify-totaal {tracked:.1f} u')
+print(f'{len(clients)} klanten, {len(projects)} projecten, {len(tags)} tags, {len(entries)} registraties ({hours:.1f} u), {len(deleted)} vroegere medewerkers, clockify-totaal {tracked:.1f} u')
+for n in names: print(n, round(__import__('os').path.getsize(n) / 1e6, 2), 'MB')

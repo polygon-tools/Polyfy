@@ -114,7 +114,9 @@ function perDay(entries, from, days) {
 const projectOf = e => byId(S.projects, e.project_id);
 const profileOf = id => byId(S.profiles, id);
 // Geïmporteerde uren van iemand zonder account hebben user_id = null en een naam/e-mail uit Clockify
-const entryUserName = e => profileOf(e.user_id)?.full_name || (e.import_name || e.import_email ? `${e.import_name || e.import_email} (no account yet)` : '');
+// Vroegere medewerkers (verwijderd in Clockify) heten "Former employee N" en krijgen nooit een account
+const isFormer = e => /^deleteduser/i.test(e.import_email || '');
+const entryUserName = e => profileOf(e.user_id)?.full_name || (isFormer(e) ? e.import_name : e.import_name || e.import_email ? `${e.import_name || e.import_email} (no account yet)` : '');
 const clientOf = p => p ? byId(S.clients, p.client_id) : null;
 const byName = (a, b) => a.name.localeCompare(b.name);
 // Tags: enkel bewaren als schema-v2 uitgevoerd is (anders bestaat de kolom tag_ids nog niet)
@@ -1574,7 +1576,7 @@ async function renderTeam(page) {
   // Nog geen account: uitgenodigd (invites) en/of uren uit Clockify (unclaimed_imports), samengevoegd per e-mail
   const waiting = new Map();
   for (const i of inv.error ? [] : inv.data || []) waiting.set(lc(i.email), { email: lc(i.email), name: i.full_name, role: i.role, invited: true, entries: 0 });
-  for (const r of un.error ? [] : un.data || []) {
+  for (const r of un.error ? [] : (un.data || []).filter(r => !/^deleteduser/i.test(r.import_email))) {
     const w = waiting.get(r.import_email) || { email: r.import_email, name: r.import_name, role: 'member', invited: false, entries: 0 };
     w.entries = r.entries; w.name = w.name || r.import_name; waiting.set(r.import_email, w);
   }
