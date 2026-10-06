@@ -84,7 +84,7 @@ for x in entries:
 def values(rows, fmt):
     return ',\n'.join(fmt(r) for r in rows)
 
-CHUNK = 3000  # registraties per bestand, zodat de SQL Editor het aankan
+CHUNK = int(__import__('os').environ.get('POLYFY_CHUNK', 1500))  # registraties per bestand: de SQL Editor kapt plakken af rond 1 MB
 nparts = 1 + (len(entries) + CHUNK - 1) // CHUNK
 base = out_path[:-4] if out_path.endswith('.sql') else out_path
 names = [f'{base}-{i + 1}-van-{nparts}.sql' for i in range(nparts)]
