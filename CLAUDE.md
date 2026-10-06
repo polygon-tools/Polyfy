@@ -20,6 +20,7 @@ Taal van de UI, commits en communicatie: **Nederlands (Vlaams)**.
 
 ## Datamodel & rechten
 - Tabellen: `profiles` (role admin|member, hourly_rate, weekly_target, active), `clients`, `projects`, `time_entries` (end_at null = lopende timer; max 1 per gebruiker; `tag_ids uuid[]`, `source_ref`), `tags` (v2).
+- `schema-v3-import-zonder-account.sql`: `time_entries.user_id` mag null zijn (geïmporteerd, nog geen account) met `import_email`/`import_name`; trigger op `auth.users` koppelt bij bevestigde e-mail via `claim_entries` (flag `polyfy.claiming` laat `check_entry_owner` door). RPC's `unclaimed_imports()` en `assign_imported(email, user)` (admin). App detecteert v3 via `S.pendingReady`.
 - `schema-v2-tags-import.sql`: tags + import. De app werkt ook zonder (`S.tagsReady` = false → geen tags/import, `tagField()` laat `tag_ids` weg).
 - Eerste geregistreerde gebruiker wordt automatisch admin (trigger `handle_new_user`).
 - RLS: leden zien/beheren enkel eigen uren; admins alles. Projecten/klanten: iedereen leest, admins schrijven.
@@ -38,5 +39,5 @@ Taal van de UI, commits en communicatie: **Nederlands (Vlaams)**.
 - `config.js` is ingevuld (project-URL + anon key van het echte Supabase-project).
 - GitHub Pages staat aan (branch `main`, map `/ (root)`) → `https://polygon-tools.github.io/Polyfy/`.
 - Code is getest met een nep-Supabase in een headless browser; eerste test tegen het echte project (account aanmaken → admin) moet nog gebeuren.
-- Tags en Clockify-import gebouwd en getest met een nep-Supabase en een echte Clockify-export (938 registraties). `schema-v2-tags-import.sql` moet nog uitgevoerd worden in Supabase, daarna importeren.
+- Tags en Clockify-import gebouwd en getest met een nep-Supabase en een echte Clockify-export (938 registraties). `schema-v2` en `schema-v3` moeten nog uitgevoerd worden in Supabase, daarna importeren (kan vóór collega's een account hebben). Alle SQL-scripts getest op lokale Postgres 16 met nagebootste auth.
 - Mogelijke uitbreidingen die ooit gevraagd kunnen worden: taken binnen projecten, goedkeuren van timesheets, PDF-export, verlof/afwezigheden.

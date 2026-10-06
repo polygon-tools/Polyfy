@@ -102,6 +102,8 @@ function perDay(entries, from, days) {
 // ---------- Domein ----------
 const projectOf = e => byId(S.projects, e.project_id);
 const profileOf = id => byId(S.profiles, id);
+// Geïmporteerde uren van iemand zonder account hebben user_id = null en een naam/e-mail uit Clockify
+const entryUserName = e => profileOf(e.user_id)?.full_name || (e.import_name || e.import_email ? `${e.import_name || e.import_email} (nog geen account)` : '');
 const clientOf = p => p ? byId(S.clients, p.client_id) : null;
 const byName = (a, b) => a.name.localeCompare(b.name);
 // Tags: enkel bewaren als schema-v2 uitgevoerd is (anders bestaat de kolom tag_ids nog niet)
@@ -931,7 +933,7 @@ async function renderReports(page) {
   if (R.tab === 'summary') {
     // Per tag telt een registratie met meerdere tags bij elke tag mee
     const keysOf = {
-      project: e => [e.project_id || ''], user: e => [e.user_id], client: e => [projectOf(e)?.client_id || ''],
+      project: e => [e.project_id || ''], user: e => [e.user_id || 'imp:' + lc(e.import_email)], client: e => [projectOf(e)?.client_id || ''],
       tag: e => e.tag_ids?.length ? e.tag_ids : [''],
       day: e => [ymd(entryStart(e))], description: e => [e.description.trim().toLowerCase()]
     }[R.group];
@@ -944,7 +946,7 @@ async function renderReports(page) {
     }
     const nameOf = r => {
       if (R.group === 'project') return projLabel(byId(S.projects, r.k));
-      if (R.group === 'user') { const p = profileOf(r.k); return `<span class="row">${avatar(p)}${esc(p?.full_name || p?.email || 'Onbekend')}</span>`; }
+      if (R.group === 'user') { const p = profileOf(r.k); return p ? `<span class="row">${avatar(p)}${esc(p.full_name || p.email)}</span>` : `<span class="muted">${esc(entryUserName(r.sample) || 'Onbekend')}</span>`; }
       if (R.group === 'client') return esc(byId(S.clients, r.k)?.name || 'Zonder klant');
       if (R.group === 'tag') return r.k ? `<span class="tag">${esc(byId(S.tags, r.k)?.name || 'Onbekende tag')}</span>` : '<span class="muted">Zonder tag</span>';
       if (R.group === 'day') return esc(fmtDate(parseYmd(r.k), { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }));
@@ -961,7 +963,7 @@ async function renderReports(page) {
     tbl.innerHTML = sorted.length ? `<table><thead><tr><th>Datum</th><th>Omschrijving</th><th>Project</th>${isAdmin() ? '<th>Medewerker</th>' : ''}<th>Tijd</th><th class="r">Duur</th><th class="r">Bedrag</th><th></th></tr></thead><tbody>
       ${sorted.map(e => `<tr data-id="${e.id}"><td class="num">${esc(fmtDate(entryStart(e), { day: '2-digit', month: '2-digit', year: 'numeric' }))}</td>
         <td>${e.description ? esc(e.description) : '<span class="muted">(geen omschrijving)</span>'}${tagChips(e.tag_ids)}</td><td>${projLabel(projectOf(e))}</td>
-        ${isAdmin() ? `<td>${esc(profileOf(e.user_id)?.full_name || '')}</td>` : ''}
+        ${isAdmin() ? `<td>${esc(entryUserName(e))}</td>` : ''}
         <td class="num muted">${hm(entryStart(e))}–${e.end_at ? hm(entryEnd(e)) : 'nu'}</td><td class="r num"><b>${fmtHM(entrySec(e))}</b></td>
         <td class="r num">${e.billable ? fmtMoney(amountFor(e, entrySec(e))) : '<span class="muted">–</span>'}</td>
         <td class="r"><button class="btn icon ghost" data-edit aria-label="Bewerken">${icon('edit')}</button></td></tr>`).join('')}
@@ -989,7 +991,7 @@ function exportCsv(entries, from, to) {
   const rows = [...entries].sort((a, b) => entryStart(a) - entryStart(b)).map(e => {
     const p = projectOf(e), u = profileOf(e.user_id), sec = entrySec(e);
     return [ymd(entryStart(e)), hm(entryStart(e)), e.end_at ? hm(entryEnd(e)) : '', fmtHM(sec), (sec / 3600).toFixed(2).replace('.', ','),
-      u?.full_name, u?.email, clientOf(p)?.name, p?.name, e.description, tagNames(e.tag_ids).join(', '), e.billable ? 'Ja' : 'Nee',
+      u?.full_name || e.import_name, u?.email || e.import_email, clientOf(p)?.name, p?.name, e.description, tagNames(e.tag_ids).join(', '), e.billable ? 'Ja' : 'Nee',
       rateFor(e).toFixed(2).replace('.', ','), amountFor(e, sec).toFixed(2).replace('.', ',')];
   });
   const csv = '﻿' + [head, ...rows].map(r => r.map(q).join(';')).join('\r\n');
@@ -1274,6 +1276,7 @@ const IMP_COLS = {
 // Clockify schrijft soms "(Without client)" e.d. in plaats van een leeg veld
 const impVal = v => /^\((without|zonder) [^)]*\)$/i.test(v) ? '' : v;
 const lc = v => String(v ?? '').trim().toLowerCase();
+const PENDING = '__pending';
 const isYes = v => /^(yes|ja|true|1|y|j)$/i.test(String(v).trim());
 
 function parseClock(t) {
@@ -1352,8 +1355,10 @@ function analyzeImport(files) {
     A.to = new Date(Math.max(...A.entries.map(e => e.start)));
   }
   // Medewerkers automatisch koppelen: eerst op e-mail, anders op naam
+  // Geen account: wachten tot de collega er een maakt (indien schema-v3), behalve verwijderde Clockify-gebruikers
   A.map = new Map([...A.users.values()].map(u => [u.key,
-    (S.profiles.find(p => lc(p.email) === lc(u.email) && u.email) || S.profiles.find(p => lc(p.full_name) === lc(u.name) && u.name))?.id || '']));
+    (S.profiles.find(p => lc(p.email) === lc(u.email) && u.email) || S.profiles.find(p => lc(p.full_name) === lc(u.name) && u.name))?.id
+    || (S.pendingReady && u.email && !/^deleteduser/i.test(u.name) ? PENDING : '')]));
   return A;
 }
 
@@ -1368,17 +1373,29 @@ function importPlan(A) {
 }
 
 async function renderImport(page) {
+  // schema-v3 aanwezig? Dan ook importeren voor collega's zonder account
+  const un = S.tagsReady ? await sb.rpc('unclaimed_imports') : { error: true };
+  if (S.view !== 'import') return;
+  S.pendingReady = !un.error;
   const A = S.imp;
   page.innerHTML = `
     <div class="page-head"><div><h1>Importeren uit Clockify</h1><div class="muted">Registraties, projecten, klanten en tags overzetten naar Polyfy</div></div></div>
     ${S.tagsReady ? '' : '<div class="card card-body notice">Voer eerst <code>supabase/schema-v2-tags-import.sql</code> uit in de Supabase SQL Editor en herlaad daarna deze pagina. Zonder die update kan er niet geïmporteerd worden.</div>'}
+    ${S.tagsReady && !S.pendingReady ? '<div class="card card-body notice">Voer ook <code>supabase/schema-v3-import-zonder-account.sql</code> uit om uren te kunnen importeren voor collega\'s die nog geen account hebben. Ze worden dan automatisch gekoppeld zodra ze er een maken.</div>' : ''}
+    ${un.data?.length ? `<div class="card table-wrap">
+      <div class="card-head"><h2>Wachten op een account</h2><span class="muted small">wordt automatisch gekoppeld bij registratie met dit e-mailadres</span></div>
+      <table><thead><tr><th>Uit Clockify</th><th class="r">Registraties</th><th class="r">Uren</th><th>Nu al koppelen aan</th></tr></thead><tbody>
+      ${un.data.map(r => `<tr><td><b>${esc(r.import_name || r.import_email)}</b><br><span class="muted small">${esc(r.import_email)}</span></td><td class="r num">${r.entries}</td><td class="r num">${fmtHM(Number(r.seconds))}</td>
+        <td><div class="row" style="flex-wrap:nowrap"><select data-claim="${esc(r.import_email)}" aria-label="Account"><option value="">Wachten op account</option>${S.profiles.map(p => `<option value="${p.id}">${esc(p.full_name || p.email)} (${esc(p.email)})</option>`).join('')}</select><button class="btn" data-claim-go>Koppelen</button></div></td></tr>`).join('')}
+      </tbody></table>
+    </div>` : ''}
     <div class="card">
       <div class="card-head"><h2>1. Exporteer uit Clockify</h2></div>
       <div class="card-body">
         <ol style="margin:0;padding-left:20px;display:flex;flex-direction:column;gap:6px">
           <li><b>Registraties:</b> <i>Reports → Detailed</i>, kies de volledige periode (vanaf je allereerste registratie), dan <i>Export → Save as CSV</i>. Lukt één lange periode niet, exporteer dan per jaar en kies hieronder alle bestanden samen.</li>
           <li><b>Alle projecten</b> (ook oude zonder registraties in de export): <i>Projects</i>, filter op <i>Active</i> én <i>Archived</i>, en exporteer de lijst als CSV. Optioneel.</li>
-          <li>Laat collega's eerst <b>zelf een account maken</b> in Polyfy: registraties worden via het e-mailadres aan hun account gekoppeld.</li>
+          <li>${S.pendingReady ? 'Collega\'s hoeven nog geen account te hebben: hun uren worden gekoppeld zodra ze zich registreren met hetzelfde e-mailadres als in Clockify.' : 'Laat collega\'s eerst <b>zelf een account maken</b> in Polyfy: registraties worden via het e-mailadres aan hun account gekoppeld.'}</li>
         </ol>
       </div>
     </div>
@@ -1396,6 +1413,13 @@ async function renderImport(page) {
     S.imp = analyzeImport(files);
     refreshPage();
   };
+  $$('[data-claim-go]', page).forEach(b => b.onclick = async () => {
+    const sel = $('select', b.parentElement);
+    if (!sel.value) return toast('Kies eerst een account.', true);
+    const { data, error } = await sb.rpc('assign_imported', { p_email: sel.dataset.claim, p_user: sel.value });
+    if (error) return fail(error);
+    toast(`${data} registraties gekoppeld`); refreshPage();
+  });
   if (A) renderImportPreview($('#i-preview'), A);
 }
 
@@ -1415,9 +1439,11 @@ function renderImportPreview(el, A) {
       <div class="card-head"><h2>3. Koppel medewerkers</h2><span class="muted small">automatisch op e-mail of naam</span></div>
       <table><thead><tr><th>In Clockify</th><th class="r">Registraties</th><th class="r">Uren</th><th>Account in Polyfy</th></tr></thead><tbody>
       ${users.map(u => `<tr><td><b>${esc(u.name || u.email)}</b><br><span class="muted small">${esc(u.email)}</span></td><td class="r num">${u.n}</td><td class="r num">${fmtHM(u.sec)}</td>
-        <td><select data-ukey="${esc(u.key)}" aria-label="Account voor ${esc(u.name)}"><option value="">Niet importeren</option>${S.profiles.map(p => `<option value="${p.id}" ${A.map.get(u.key) === p.id ? 'selected' : ''}>${esc(p.full_name || p.email)} (${esc(p.email)})</option>`).join('')}</select></td></tr>`).join('')}
+        <td><select data-ukey="${esc(u.key)}" aria-label="Account voor ${esc(u.name)}"><option value="">Niet importeren</option>${S.pendingReady && u.email ? `<option value="${PENDING}" ${A.map.get(u.key) === PENDING ? 'selected' : ''}>Koppelen zodra ${esc(u.email)} een account maakt</option>` : ''}${S.profiles.map(p => `<option value="${p.id}" ${A.map.get(u.key) === p.id ? 'selected' : ''}>${esc(p.full_name || p.email)} (${esc(p.email)})</option>`).join('')}</select></td></tr>`).join('')}
       </tbody></table>
-      <div class="card-body muted small" style="border-top:1px solid var(--line)">Heeft iemand nog geen account? Laat die collega er eerst een maken en importeer hetzelfde bestand later opnieuw: wat al geïmporteerd is, wordt overgeslagen.</div>
+      <div class="card-body muted small" style="border-top:1px solid var(--line)">${S.pendingReady
+        ? 'Collega\'s zonder account: hun uren worden nu al geïmporteerd en automatisch aan hun account gekoppeld zodra ze zich registreren met hetzelfde e-mailadres. Tot dan zie enkel jij ze (in Rapporten).'
+        : 'Heeft iemand nog geen account? Laat die collega er eerst een maken en importeer hetzelfde bestand later opnieuw: wat al geïmporteerd is, wordt overgeslagen.'}</div>
     </div>` : ''}
     <div class="card">
       <div class="card-head"><h2>${users.length ? '4' : '3'}. Importeren</h2></div>
@@ -1476,7 +1502,10 @@ async function runImport(A, progress) {
   const tagId = new Map(S.tags.map(t => [lc(t.name), t.id]));
 
   const rows = A.entries.filter(e => A.map.get(e.ukey)).map(e => ({
-    user_id: A.map.get(e.ukey), project_id: e.project ? projectId.get(lc(e.project) + '|' + lc(e.client)) || null : null,
+    ...(A.map.get(e.ukey) === PENDING
+      ? { user_id: null, import_email: lc(A.users.get(e.ukey).email), import_name: A.users.get(e.ukey).name }
+      : { user_id: A.map.get(e.ukey) }),
+    project_id: e.project ? projectId.get(lc(e.project) + '|' + lc(e.client)) || null : null,
     description: e.description, billable: e.billable, start_at: e.start.toISOString(), end_at: e.end.toISOString(),
     tag_ids: e.tags.map(t => tagId.get(lc(t))).filter(Boolean), source_ref: e.ref
   }));

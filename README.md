@@ -42,16 +42,19 @@ Nieuwe functies die de database wijzigen komen als apart script in `supabase/`. 
 | Script | Voor |
 |---|---|
 | [`supabase/schema-v2-tags-import.sql`](supabase/schema-v2-tags-import.sql) | tags en importeren uit Clockify |
+| [`supabase/schema-v3-import-zonder-account.sql`](supabase/schema-v3-import-zonder-account.sql) | uren importeren voor collega's die nog geen account hebben |
 
 ## Overzetten vanuit Clockify
 
-1. Voer `schema-v2-tags-import.sql` uit (zie hierboven).
-2. Laat alle collega's eerst een account maken: registraties worden via het **e-mailadres** aan hun account gekoppeld.
+1. Voer `schema-v2-tags-import.sql` en `schema-v3-import-zonder-account.sql` uit (zie hierboven).
+2. Collega's hoeven nog geen account te hebben: hun uren worden geïmporteerd en automatisch gekoppeld zodra ze zich
+   registreren (en hun e-mail bevestigen) met **hetzelfde e-mailadres als in Clockify**. Tot dan ziet enkel een beheerder ze.
+   Ander e-mailadres gebruikt? Koppel ze dan manueel onder *Importeren → Wachten op een account*.
 3. In Clockify: *Reports → Detailed*, kies de volledige periode, *Export → Save as CSV*. Optioneel ook de projectlijst
    (*Projects*, actief én gearchiveerd) als CSV, zodat ook oude projecten zonder uren in de export meekomen.
 4. In Polyfy (als beheerder): *Importeren*, kies de bestanden, controleer de koppeling van medewerkers en klik *Importeren*.
    Klanten, projecten en tags die nog niet bestaan worden aangemaakt; alle projecten komen als *actief* binnen.
-5. Opnieuw importeren is veilig: registraties die al geïmporteerd zijn worden overgeslagen. Handig als een collega later pas een account maakt.
+5. Opnieuw importeren is veilig: registraties die al geïmporteerd zijn worden overgeslagen.
 
 Niet in de export, dus achteraf zelf instellen: uurtarieven, budgetten en weekdoelen.
 
@@ -73,3 +76,4 @@ python3 -m http.server 8000
 | `config.js` | Supabase-URL en anon key |
 | `supabase/schema.sql` | tabellen, beveiliging (RLS) en functies |
 | `supabase/schema-v2-tags-import.sql` | update: tags en import |
+| `supabase/schema-v3-import-zonder-account.sql` | update: import voor collega's zonder account |
