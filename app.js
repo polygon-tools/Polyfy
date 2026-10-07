@@ -66,6 +66,12 @@ function parseHM(v) {
   const h = Number(m[1]), mi = Number(m[2] || 0);
   return h < 24 && mi < 60 ? [h, mi] : null;
 }
+// Tijdvelden: 4 cijfers (1315) worden meteen 13:15; bij verlaten wordt 13 -> 13:00 (zie de change-handlers)
+const HM_INPUTS = 'input.hm, input.em-hm, input[data-act=start], input[data-act=end]';
+document.addEventListener('input', e => {
+  const i = e.target; if (!i.matches?.(HM_INPUTS) || !/^\d{4}$/.test(i.value)) return;
+  const t = parseHM(i.value); if (t) i.value = `${pad(t[0])}:${pad(t[1])}`;
+}, true);
 const parseYmd = s => { const [y, m, d] = s.split('-').map(Number); return new Date(y, m - 1, d); };
 const hm = d => `${pad(d.getHours())}:${pad(d.getMinutes())}`;
 const sameDay = (a, b) => ymd(a) === ymd(b);
@@ -423,8 +429,8 @@ function renderTimer() {
     <button class="btn ghost projbtn" id="t-proj" title="Project">${projBtnHtml(cur.project_id)}</button>
     ${S.tagsReady ? `<button class="btn ghost tagbtn" id="t-tags" title="Tags">${tagBtnHtml(cur.tag_ids)}</button>` : ''}
     <button class="billable-toggle ${cur.billable ? 'on' : ''}" id="t-bill" title="Billable" aria-pressed="${!!cur.billable}">€</button>
-    ${man ? `<span class="tb-times"><input class="hm num" id="t-start" value="${manual.start}" aria-label="Start" inputmode="numeric"><span class="muted">–</span><input class="hm num" id="t-end" value="${manual.end}" aria-label="End" inputmode="numeric"><input type="date" id="t-date" value="${manual.date}" aria-label="Date"></span>
-        <input class="clock num tb-dur" id="t-dur" aria-label="Duration">
+    ${man ? `<span class="tb-times"><input class="hm num" id="t-start" value="${manual.start}" aria-label="Start" inputmode="numeric" autocomplete="off"><span class="muted">–</span><input class="hm num" id="t-end" value="${manual.end}" aria-label="End" inputmode="numeric" autocomplete="off"><input type="date" id="t-date" value="${manual.date}" aria-label="Date"></span>
+        <input class="clock num tb-dur" id="t-dur" aria-label="Duration" autocomplete="off">
         <button class="btn start" id="t-add">Add</button>`
       : `<span class="clock num" id="t-clock">${fmtHMS(r ? entrySec(r) : 0)}</span>
         <button class="btn ${r ? 'stop' : 'start'}" id="t-go">${r ? 'Stop' : 'Start'}</button>`}
@@ -536,29 +542,60 @@ document.addEventListener('mousedown', e => { const m = $('#menu'); if (m && !m.
 addEventListener('scroll', e => { if (!e.target.closest?.('#menu')) closeMenu(); }, true);
 
 // Keuzelijst met zoekveld. items: [{ id, label, dot?, group? }]; id '' = "alle"/"geen".
-function pickFrom(anchor, items, current, onPick, { placeholder = 'Search…', emptyLabel = null, cls = '' } = {}) {
-  openMenu(anchor, `<input placeholder="${esc(placeholder)}" aria-label="Search"><div class="list"></div>`, m => {
+// create: { noun, form(m, name, done), quick(name) } -> "Create new …" onderaan en Ctrl+Enter (zoals Clockify)
+function pickFrom(anchor, items, current, onPick, { placeholder = 'Search…', emptyLabel = null, cls = '', create = null } = {}) {
+  openMenu(anchor, `<input placeholder="${esc(placeholder)}" aria-label="Search" autocomplete="off"><div class="list"></div>${create ? `<button type="button" class="mcreate">${icon('plus')}Create new ${esc(create.noun)}</button>` : ''}`, m => {
     const inp = $('input', m), list = $('.list', m);
+    const done = id => { closeMenu(); if (id) onPick(id); };
     const draw = () => {
-      const q = inp.value.trim().toLowerCase();
+      const raw = inp.value.trim(), q = raw.toLowerCase();
       const hits = items.filter(x => !q || (x.label + ' ' + (x.group || '')).toLowerCase().includes(q));
       let html = emptyLabel && !q ? `<button class="mi ${!current ? 'on' : ''}" data-v="">${esc(emptyLabel)}</button>` : '', grp = null;
       for (const x of hits) {
         if (x.group !== undefined && x.group !== grp) { grp = x.group; html += `<div class="mh">${esc(grp)}</div>`; }
         html += `<button class="mi ${x.id === current ? 'on' : ''}" data-v="${esc(x.id)}">${x.dot ? `<span class="dot" style="background:${esc(x.dot)}"></span>` : ''}${esc(x.label)}${x.extra ? ` <span class="muted">${esc(x.extra)}</span>` : ''}</button>`;
       }
-      list.innerHTML = html || '<div class="muted small" style="padding:6px 8px">No results.</div>';
+      const noun = create ? create.noun.toLowerCase() + 's' : 'results';
+      list.innerHTML = html || `<div class="mempty">No matching ${esc(noun)}${create && raw ? `<small>Press Ctrl+Enter to quickly <a href="#" data-quick>create '${esc(raw)}' ${esc(create.noun)}</a>.</small>` : ''}</div>`;
       $$('[data-v]', list).forEach(b => b.onclick = () => { closeMenu(); onPick(b.dataset.v || null); });
+      $('[data-quick]', list)?.addEventListener('click', ev => { ev.preventDefault(); quick(); });
     };
+    const quick = async () => { const raw = inp.value.trim(); if (create && raw) done(await create.quick(raw)); };
     inp.oninput = draw; draw();
+    inp.onkeydown = ev => { if (ev.key === 'Enter' && (ev.ctrlKey || ev.metaKey)) { ev.preventDefault(); quick(); } };
+    if (create) $('.mcreate', m).onclick = () => create.form(m, inp.value.trim(), done);
   }, cls);
 }
-// Project kiezen, gegroepeerd per klant (zoals Clockify)
-function pickProject(anchor, current, onPick, { emptyLabel = 'No project', includeArchived = false } = {}) {
+// Project kiezen, gegroepeerd per klant (zoals Clockify); nieuw project kan meteen vanuit de lijst
+function pickProject(anchor, current, onPick, { emptyLabel = 'No project', includeArchived = false, canCreate = true } = {}) {
   const items = S.projects.filter(p => includeArchived || !p.archived || p.id === current)
     .map(p => ({ id: p.id, label: p.name, dot: p.color, group: clientOf(p)?.name || 'Without client', extra: p.archived ? '(archived)' : '' }))
     .sort((a, b) => a.group.localeCompare(b.group) || a.label.localeCompare(b.label));
-  pickFrom(anchor, items, current, onPick, { placeholder: 'Search project or client', emptyLabel, cls: 'wide' });
+  pickFrom(anchor, items, current, onPick, { placeholder: 'Search project or client', emptyLabel, cls: 'wide', create: canCreate && {
+    noun: 'Project', quick: name => createProject(name, null),
+    form: (m, name, done) => {
+      m.innerHTML = `<div class="mform"><div class="mh">Create new project</div>
+        <input id="np-name" placeholder="Enter project name" value="${esc(name)}" autocomplete="off" aria-label="Project name">
+        <select id="np-client" aria-label="Client"><option value="">No client</option>${S.clients.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select>
+        <div class="row" style="justify-content:flex-end"><button type="button" class="linkbtn" id="np-cancel">Cancel</button><button type="button" class="btn primary" id="np-go">Create</button></div></div>`;
+      const go = async () => {
+        const n = $('#np-name', m).value.trim(); if (!n) return toast('Enter a project name.', true);
+        const id = await createProject(n, $('#np-client', m).value || null); if (id) done(id);
+      };
+      $('#np-go', m).onclick = go; $('#np-cancel', m).onclick = closeMenu;
+      $('#np-name', m).onkeydown = ev => { if (ev.key === 'Enter') go(); };
+      $('#np-name', m).focus();
+    } } });
+}
+// Nieuw project (iedereen mag, zie schema-v7); bestaat het al, dan wordt dat gekozen
+async function createProject(name, clientId) {
+  const old = S.projects.find(p => lc(p.name) === lc(name) && (p.client_id || null) === clientId);
+  if (old) return old.id;
+  const { data, error } = await sb.from('projects').insert({ name, client_id: clientId, color: PROJECT_COLORS[S.projects.length % PROJECT_COLORS.length] }).select().single();
+  if (error) { fail(/row-level security/i.test(error.message) ? new Error('Run supabase/schema-v7-projecten-aanmaken.sql in Supabase first.') : error); return null; }
+  S.projects.push(data); S.projects.sort((a, b) => a.name.localeCompare(b.name));
+  toast(`Project "${name}" created`);
+  return data.id;
 }
 
 // ---------- Periodekiezer (zoals "This week" met vorige/volgende) ----------
@@ -698,11 +735,11 @@ function openEntryModal(entry, preset = {}) {
     <div class="em">
       <div class="em-lbl">Time and date</div>
       <div class="em-time">
-        <input class="em-dur num" id="m-dur" aria-label="Duration" ${running ? 'disabled' : ''}>
+        <input class="em-dur num" id="m-dur" aria-label="Duration" autocomplete="off" ${running ? 'disabled' : ''}>
         <span class="em-vsep"></span>
-        <input class="em-hm num" id="m-start" value="${hm(st)}" aria-label="Start" inputmode="numeric">
+        <input class="em-hm num" id="m-start" value="${hm(st)}" aria-label="Start" inputmode="numeric" autocomplete="off">
         <span class="muted">-</span>
-        ${running ? '<input class="em-hm" disabled value="now" aria-label="End">' : `<input class="em-hm num" id="m-end" value="${en ? hm(en) : ''}" aria-label="End" inputmode="numeric">`}
+        ${running ? '<input class="em-hm" disabled value="now" aria-label="End">' : `<input class="em-hm num" id="m-end" value="${en ? hm(en) : ''}" aria-label="End" inputmode="numeric" autocomplete="off">`}
         <span class="em-cal">${icon('cal')}</span>
         <input type="date" class="em-date" id="m-date" value="${ymd(st)}" aria-label="Date">
       </div>
@@ -944,7 +981,7 @@ function trackRow(g, child = false) {
     ${S.tagsReady ? `<button class="te-tags ${tags.length ? 'on' : ''}" data-act="tags" title="Tags">${tags.length ? tags.map(t => `<span class="tag t-blue">${esc(t)}</span>`).join('') : icon('tag')}</button>` : ''}
     <button class="te-bill ${e.billable ? 'on' : ''}" data-act="bill" title="Billable">€</button>
     <span class="te-times num">${multi ? `<span class="muted">${hm(first)} – ${e.end_at ? hm(last) : 'now'}</span>`
-      : `<input class="num" data-act="start" value="${hm(entryStart(e))}" aria-label="Start" inputmode="numeric"><span class="muted">–</span>${running ? '<span class="muted">now</span>' : `<input class="num" data-act="end" value="${hm(entryEnd(e))}" aria-label="End" inputmode="numeric">`}`}</span>
+      : `<input class="num" data-act="start" value="${hm(entryStart(e))}" aria-label="Start" inputmode="numeric" autocomplete="off"><span class="muted">–</span>${running ? '<span class="muted">now</span>' : `<input class="num" data-act="end" value="${hm(entryEnd(e))}" aria-label="End" inputmode="numeric" autocomplete="off">`}`}</span>
     ${multi ? '<span class="te-ico"></span>' : `<button class="btn icon ghost te-ico" data-act="date" title="Change date" aria-label="Change date">${icon('cal')}</button>`}
     <span class="te-dur num">${running && !multi ? '<span class="tag live">running</span>' : fmtHMS(sec)}</span>
     <button class="btn icon ghost" data-act="play" title="Continue timer for this activity" aria-label="Continue">${icon('play')}</button>
@@ -1356,7 +1393,7 @@ async function renderReports(page) {
   if ($('#r-clear')) $('#r-clear').onclick = () => set({ user: '', client: '', project: '', tag: '', desc: '' });
   $$('[data-f]', page).forEach(b => b.onclick = () => {
     const f = b.dataset.f, pick = v => set({ [f]: v || '' });
-    if (f === 'project') return pickProject(b, R.project, pick, { emptyLabel: 'All projects', includeArchived: true });
+    if (f === 'project') return pickProject(b, R.project, pick, { emptyLabel: 'All projects', includeArchived: true, canCreate: false });
     const items = f === 'user' ? S.profiles.map(p => ({ id: p.id, label: p.full_name || p.email }))
       : f === 'client' ? [{ id: '__none', label: 'Without client' }, ...S.clients.map(c => ({ id: c.id, label: c.name }))]
       : [{ id: '__none', label: 'Without tag' }, ...S.tags.map(t => ({ id: t.id, label: t.name }))];

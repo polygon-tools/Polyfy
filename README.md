@@ -45,6 +45,7 @@ Nieuwe functies die de database wijzigen komen als apart script in `supabase/`. 
 | [`supabase/schema-v4-uitnodigingen.sql`](supabase/schema-v4-uitnodigingen.sql) | collega's vooraf klaarzetten met een rol |
 | [`supabase/schema-v5-automatisch-koppelen.sql`](supabase/schema-v5-automatisch-koppelen.sql) | geïmporteerde uren automatisch koppelen bij het inloggen |
 | [`supabase/schema-v6-leden-verwijderen.sql`](supabase/schema-v6-leden-verwijderen.sql) | leden verwijderen (uren blijven bewaard) |
+| [`supabase/schema-v7-projecten-aanmaken.sql`](supabase/schema-v7-projecten-aanmaken.sql) | iedereen mag projecten aanmaken (vanuit de projectlijst) |
 
 ## Overzetten vanuit Clockify
 
@@ -75,3 +76,4 @@ python3 -m http.server 8000
 | `supabase/schema-v4-uitnodigingen.sql` | update: uitnodigingen met rol |
 | `supabase/schema-v5-automatisch-koppelen.sql` | update: uren automatisch koppelen bij login |
 | `supabase/schema-v6-leden-verwijderen.sql` | update: leden verwijderen |
+| `supabase/schema-v7-projecten-aanmaken.sql` | update: iedereen mag projecten aanmaken |
