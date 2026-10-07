@@ -8,7 +8,7 @@ Interne urenregistratie (alternatief voor Clockify) — statische website + Supa
 - **Calendar**: week- of dagweergave met zoom; klik op een leeg vak om uren toe te voegen, klik op een blok om te bewerken. Beheerders kunnen de kalender van elke collega bekijken.
 - **Reports**: Samenvatting, Gedetailleerd en Wekelijks, met filters op team, klant, project, tag en omschrijving. Exporteren als **PDF** of **CSV** (opent in Excel).
 - **Projects**: zoeken, filteren per klant, kleur, archiveren. **Clients** en **Tags** hebben elk een eigen pagina.
-- **Team**: leden met e-mail en rol; filteren en zoeken, rollen aanpassen, accounts deactiveren, nieuwe leden vooraf klaarzetten met een rol en uitnodigen.
+- **Team**: leden met e-mail en rol; filteren en zoeken, rollen aanpassen, accounts deactiveren of verwijderen (uren blijven bewaard), nieuwe leden vooraf klaarzetten met een rol en uitnodigen.
 
 **Rechten**
 - De eerste persoon die een account maakt wordt automatisch **beheerder**; alle volgende zijn **medewerker**.
@@ -44,6 +44,7 @@ Nieuwe functies die de database wijzigen komen als apart script in `supabase/`. 
 | [`supabase/schema-v3-import-zonder-account.sql`](supabase/schema-v3-import-zonder-account.sql) | uren importeren voor collega's die nog geen account hebben |
 | [`supabase/schema-v4-uitnodigingen.sql`](supabase/schema-v4-uitnodigingen.sql) | collega's vooraf klaarzetten met een rol |
 | [`supabase/schema-v5-automatisch-koppelen.sql`](supabase/schema-v5-automatisch-koppelen.sql) | geïmporteerde uren automatisch koppelen bij het inloggen |
+| [`supabase/schema-v6-leden-verwijderen.sql`](supabase/schema-v6-leden-verwijderen.sql) | leden verwijderen (uren blijven bewaard) |
 
 ## Overzetten vanuit Clockify
 
@@ -73,3 +74,4 @@ python3 -m http.server 8000
 | `supabase/schema-v3-import-zonder-account.sql` | update: import voor collega's zonder account |
 | `supabase/schema-v4-uitnodigingen.sql` | update: uitnodigingen met rol |
 | `supabase/schema-v5-automatisch-koppelen.sql` | update: uren automatisch koppelen bij login |
+| `supabase/schema-v6-leden-verwijderen.sql` | update: leden verwijderen |

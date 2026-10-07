@@ -659,11 +659,11 @@ addEventListener('scroll', e => { if (!e.target.closest?.('#tagpop')) closeTagPo
 // =====================================================================
 // Modals
 // =====================================================================
-function openModal(title, bodyHtml, footHtml) {
+function openModal(title, bodyHtml, footHtml, cls = '') {
   closeModal();
   const bg = document.createElement('div');
   bg.className = 'modal-bg'; bg.id = 'modal';
-  bg.innerHTML = `<div class="modal" role="dialog" aria-modal="true" aria-label="${esc(title)}">
+  bg.innerHTML = `<div class="modal ${cls}" role="dialog" aria-modal="true" aria-label="${esc(title)}">
     <div class="modal-head"><h2>${esc(title)}</h2><button class="btn icon ghost" data-close aria-label="Close">${icon('x')}</button></div>
     <div class="modal-body">${bodyHtml}</div>
     <div class="modal-foot">${footHtml}</div></div>`;
@@ -677,6 +677,8 @@ function closeModal() { closeTagPop(); closeMenu(); $('#modal')?.remove(); }
 document.addEventListener('keydown', e => { if (e.key !== 'Escape') return; if ($('#menu')) closeMenu(); else if ($('#tagpop')) closeTagPop(); else closeModal(); });
 
 // Registratie toevoegen of bewerken. `entry` = null voor nieuw; `preset` vult velden voor.
+// Registratie toevoegen of bewerken, opgebouwd zoals het venster van Clockify:
+// bovenaan duur | start - einde | datum, daaronder omschrijving, project (verplicht), tags, (medewerker), billable.
 function openEntryModal(entry, preset = {}) {
   const e = entry || {
     description: '', project_id: preset.project_id || null, billable: true,
@@ -689,25 +691,32 @@ function openEntryModal(entry, preset = {}) {
   const en = e.end_at ? new Date(e.end_at) : (entry ? null : new Date(st.getTime() + 3600000));
   const running = entry && !entry.end_at;
   const canEditUser = isAdmin() && !entry;
-  let tagIds = [...(e.tag_ids || preset.tag_ids || [])];
+  let tagIds = [...(e.tag_ids || preset.tag_ids || [])], projId = e.project_id || null;
+  const projHtml = pid => `<span class="sel-v">${pid ? projBtnHtml(pid) : '<span class="muted">Select Project</span>'}</span>${icon('down')}`;
+  const tagsHtml = ids => `<span class="sel-v">${tagNames(ids).length ? tagNames(ids).map(t => `<span class="tag t-blue">${esc(t)}</span>`).join(' ') : '<span class="muted">Add tags</span>'}</span>${icon('down')}`;
   const m = openModal(entry ? 'Edit time entry' : 'Add time entry', `
-    <label class="field">Description<input id="m-desc" value="${esc(e.description)}" placeholder="What have you worked on?"></label>
-    <div class="field">Project<button type="button" class="btn projbtn mproj" id="m-proj">${projBtnHtml(e.project_id)}</button></div>
-    ${S.tagsReady ? `<div class="field">Tags<button type="button" class="btn tagbtn" id="m-tags" style="justify-content:flex-start">${tagBtnHtml(tagIds)}</button></div>` : ''}
-    ${canEditUser ? `<label class="field">Team member<select id="m-user">${S.profiles.filter(p => p.active).map(p => `<option value="${p.id}" ${p.id === e.user_id ? 'selected' : ''}>${esc(p.full_name || p.email)}</option>`).join('')}</select></label>` : ''}
-    <div class="grid2">
-      <label class="field">Date<input type="date" id="m-date" value="${ymd(st)}" required></label>
-      <div class="grid2" style="gap:8px">
-        <label class="field">Start<input class="num" id="m-start" value="${hm(st)}" inputmode="numeric" required></label>
-        <label class="field">End${running ? '<input disabled value="running">' : `<input class="num" id="m-end" value="${en ? hm(en) : ''}" inputmode="numeric" required>`}</label>
+    <div class="em">
+      <div class="em-lbl">Time and date</div>
+      <div class="em-time">
+        <input class="em-dur num" id="m-dur" aria-label="Duration" ${running ? 'disabled' : ''}>
+        <span class="em-vsep"></span>
+        <input class="em-hm num" id="m-start" value="${hm(st)}" aria-label="Start" inputmode="numeric">
+        <span class="muted">-</span>
+        ${running ? '<input class="em-hm" disabled value="now" aria-label="End">' : `<input class="em-hm num" id="m-end" value="${en ? hm(en) : ''}" aria-label="End" inputmode="numeric">`}
+        <span class="em-cal">${icon('cal')}</span>
+        <input type="date" class="em-date" id="m-date" value="${ymd(st)}" aria-label="Date">
       </div>
-    </div>
-    <div class="row" style="justify-content:space-between">
-      <label class="check"><input type="checkbox" id="m-bill" ${e.billable ? 'checked' : ''}> Billable</label>
-      <span class="muted">Duration: <b class="num" id="m-dur">–</b></span>
+      <div class="em-rows">
+        <label class="em-row"><span>Description</span><textarea id="m-desc" rows="2" placeholder="What have you worked on?">${esc(e.description)}</textarea></label>
+        <div class="em-row"><span>Project <b class="req">*</b></span><button type="button" class="em-sel" id="m-proj">${projHtml(projId)}</button></div>
+        ${S.tagsReady ? `<div class="em-row"><span>Tags</span><button type="button" class="em-sel" id="m-tags">${tagsHtml(tagIds)}</button></div>` : ''}
+        ${canEditUser ? `<label class="em-row"><span>User</span><select id="m-user">${S.profiles.filter(p => p.active).map(p => `<option value="${p.id}" ${p.id === e.user_id ? 'selected' : ''}>${esc(p.full_name || p.email)}</option>`).join('')}</select></label>` : ''}
+        <div class="em-row"><span>Billable</span><label class="switch"><input type="checkbox" id="m-bill" ${e.billable ? 'checked' : ''}><i></i><span id="m-bill-l">${e.billable ? 'Yes' : 'No'}</span></label></div>
+      </div>
     </div>`,
     `<div>${entry ? `<button class="btn danger" id="m-del">${icon('trash')}Delete</button>` : ''}</div>
-     <div class="row"><button class="btn" data-close>Cancel</button><button class="btn primary" id="m-save">Save</button></div>`);
+     <div class="row"><button class="linkbtn" data-close>Cancel</button><button class="btn primary em-go" id="m-save">${entry ? 'Save' : 'Add'}</button></div>`, 'wide');
+  setTimeout(() => $('#m-desc')?.focus(), 40);
 
   const times = () => {
     const day = parseYmd($('#m-date').value || ymd(st));
@@ -719,18 +728,35 @@ function openEntryModal(entry, preset = {}) {
     if (en2 <= s) en2 = addDays(en2, 1); // eindigt na middernacht
     return { s, en: en2 };
   };
-  const upd = () => { const { s, en: x } = times(); $('#m-dur').textContent = fmtHM(((x || new Date()) - s) / 1000); };
-  $$('#m-date,#m-start,#m-end', m).forEach(i => i.addEventListener('input', upd)); upd();
-  // Project kiezen met zoekfunctie (zelfde lijst als in de Time Tracker)
-  let projId = e.project_id || null;
-  $('#m-proj').onclick = () => pickProject($('#m-proj'), projId, pid => {
-    projId = pid; $('#m-proj').innerHTML = projBtnHtml(pid);
-    const p = byId(S.projects, pid); if (p) $('#m-bill').checked = p.billable;
+  const upd = () => { const { s, en: x } = times(); $('#m-dur').value = fmtHMS(((x || new Date()) - s) / 1000); };
+  $$('#m-date,#m-start,#m-end', m).forEach(i => i.addEventListener('input', upd));
+  $$('.em-hm', m).forEach(i => {
+    i.onfocus = () => i.select();
+    i.onchange = () => { const t = parseHM(i.value); if (t) i.value = `${pad(t[0])}:${pad(t[1])}`; upd(); };
   });
-  if (S.tagsReady) bindTagPicker($('#m-tags'), () => tagIds, ids => { tagIds = ids; });
+  // Duur typen (1:30, 1,5 …) verschuift het einde, zoals in Clockify
+  $('#m-dur').onfocus = () => $('#m-dur').select();
+  $('#m-dur').onchange = () => {
+    const sec = parseDur($('#m-dur').value);
+    if (sec == null || sec > 24 * 3600) { toast('Enter a duration like 1:30 or 1.5 (max. 24 hours).', true); return upd(); }
+    const { s } = times(); if ($('#m-end')) $('#m-end').value = hm(new Date(s.getTime() + sec * 1000)); upd();
+  };
+  upd();
+  $('#m-bill').onchange = () => { $('#m-bill-l').textContent = $('#m-bill').checked ? 'Yes' : 'No'; };
+  // Project kiezen met zoekfunctie (zelfde lijst als in de Time Tracker)
+  $('#m-proj').onclick = () => pickProject($('#m-proj'), projId, pid => {
+    projId = pid; $('#m-proj').innerHTML = projHtml(pid); $('#m-proj').classList.remove('invalid');
+    const p = byId(S.projects, pid); if (p) { $('#m-bill').checked = p.billable; $('#m-bill').onchange(); }
+  }, { emptyLabel: null });
+  if (S.tagsReady) $('#m-tags').onclick = ev => {
+    ev.preventDefault();
+    if ($('#tagpop')?.anchor === $('#m-tags')) return closeTagPop();
+    openTagPop($('#m-tags'), tagIds, ids => { tagIds = ids; $('#m-tags').innerHTML = tagsHtml(ids); });
+  };
 
   $('#m-save').onclick = async () => {
     const { s, en: x } = times();
+    if (!projId) { $('#m-proj').classList.add('invalid'); return toast('Select a project.', true); }
     if (x && x - s > 24 * 3600000) return toast('A time entry can be at most 24 hours long.', true);
     const row = {
       description: $('#m-desc').value.trim(), project_id: projId,
@@ -1380,70 +1406,132 @@ const loadScript = src => new Promise((res, rej) => {
   document.head.appendChild(el);
 });
 
-// PDF met samenvatting (huidige groepering) en gedetailleerde lijst. jsPDF wordt pas geladen bij de eerste export.
+// PDF zoals het "Summary report" van Clockify (staand A4): titel, periode en totaal, groene staafgrafiek,
+// per groepering een ring met lijst, daarna de tabel (groep / subgroep). Bij Detailed: de lijst met registraties.
 async function exportPdf(entries, from, to) {
   await loadScript('https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js');
   await loadScript('https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js');
-  const R = S.rep, doc = new window.jspdf.jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+  const R = S.rep, doc = new window.jspdf.jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+  const PW = 210, PH = 297, L = 15, RX = PW - 15;
   const secOf = e => clipSec(e, from, to);
   const total = entries.reduce((a, e) => a + secOf(e), 0);
-  const groupLabel = GROUPS.find(x => x[0] === R.g1)[1];
+  const rgb = h => { const n = parseInt(String(h).slice(1), 16); return [n >> 16 & 255, n >> 8 & 255, n & 255]; };
+  const dmy = x => fmtDate(x, { day: '2-digit', month: '2-digit', year: 'numeric' });
+  const gray = v => doc.setTextColor(v), font = (sz, st = 'normal') => { doc.setFontSize(sz); doc.setFont('helvetica', st); };
+  const fit = (t, w) => doc.splitTextToSize(String(t), w)[0] + (doc.getTextWidth(String(t)) > w ? '…' : '');
   const filters = [
-    R.desc && `Description: ${R.desc}`,
-    R.user && `User: ${profileOf(R.user)?.full_name || ''}`, R.client && `Client: ${byId(S.clients, R.client)?.name || ''}`,
-    R.project && `Project: ${byId(S.projects, R.project)?.name || ''}`,
-    R.tag && `Tag: ${R.tag === '__none' ? 'without tag' : byId(S.tags, R.tag)?.name || ''}`
+    R.user && `User: ${profileOf(R.user)?.full_name || ''}`, R.client && `Client: ${R.client === '__none' ? 'without client' : byId(S.clients, R.client)?.name || ''}`,
+    R.project && `Project: ${byId(S.projects, R.project)?.name || ''}`, R.tag && `Tag: ${R.tag === '__none' ? 'without tag' : byId(S.tags, R.tag)?.name || ''}`,
+    R.desc && `Description: ${R.desc}`
   ].filter(Boolean);
-  const d = x => fmtDate(x, { month: 'short', day: 'numeric', year: 'numeric' });
-  const style = { fontSize: 9, cellPadding: 1.6 }, head = { fillColor: [3, 169, 244] };
 
-  doc.setFontSize(16); doc.text('Polyfy - Time report', 14, 16);
-  doc.setFontSize(10); doc.setTextColor(90);
-  doc.text(`${d(from)} - ${d(addDays(to, -1))}${filters.length ? '   |   ' + filters.join('   |   ') : ''}`, 14, 23);
-  doc.text(`Total ${fmtHMS(total)} (${fmtDec(total)} h)   |   ${entries.length} time entries   |   created ${d(new Date())}`, 14, 29);
-  doc.setTextColor(0);
+  // Kop
+  const title = { summary: 'Summary report', detailed: 'Detailed report', weekly: 'Weekly report' }[R.tab] || 'Summary report';
+  font(22); gray(30); doc.text(title, L, 22);
+  font(9); gray(120); doc.text(`${dmy(from)} - ${dmy(addDays(to, -1))}${filters.length ? '   ·   ' + filters.join('   ·   ') : ''}`, L, 29);
+  font(9); gray(120); doc.text('Total:', L, 38); font(12); gray(30); doc.text(fmtHMS(total), L + 11, 38);
+  // Logo rechtsboven (Polyfy-zeshoek + naam)
+  const hx = RX - 38, hy = 18, hr = 6;
+  doc.setFillColor(42, 120, 214);
+  doc.lines([0, 1, 2, 3, 4, 5].map(i => { const a1 = Math.PI / 3 * i - Math.PI / 2, a2 = Math.PI / 3 * (i + 1) - Math.PI / 2; return [hr * (Math.cos(a2) - Math.cos(a1)), hr * (Math.sin(a2) - Math.sin(a1))]; }), hx, hy - hr, [1, 1], 'F', true);
+  doc.setDrawColor(255); doc.setLineWidth(0.9); doc.line(hx, hy - 3, hx, hy); doc.line(hx, hy, hx + 2.6, hy + 1.6); doc.setLineWidth(0.2);
+  font(18, 'bold'); gray(40); doc.text('Polyfy', hx + 9, hy + 2.5);
 
-  // Grafiek zoals op de Reports-pagina: groene staven per dag/week/maand
+  // Staafgrafiek (groen, labels schuin zoals Clockify)
   const bk = buckets(from, to).map(k => ({ ...k, sec: entries.reduce((t, e) => t + clipSec(e, k.a, k.b), 0) }));
-  const cx = 24, cy = 36, cw = 259, ch = 52, maxH = niceMax(Math.max(...bk.map(k => k.sec / 3600)));
-  doc.setFontSize(7); doc.setDrawColor(225); doc.setTextColor(140);
-  for (let i = 0; i <= 4; i++) {
-    const y = cy + ch - ch * i / 4;
-    doc.line(cx, y, cx + cw, y);
-    doc.text(`${(maxH * i / 4).toLocaleString('en-US')}h`, cx - 2, y + 1, { align: 'right' });
+  const cx = L + 12, cy = 48, cw = RX - cx, ch = 62, maxH = niceMax(Math.max(...bk.map(k => k.sec / 3600)));
+  font(7); doc.setDrawColor(228);
+  for (let i = 0; i <= 5; i++) {
+    const y = cy + ch - ch * i / 5;
+    doc.line(cx, y, RX, y); gray(130); doc.text(`${(maxH * i / 5).toFixed(1)}h`, cx - 2, y + 1, { align: 'right' });
   }
-  const band = cw / bk.length, bw = Math.min(16, band * 0.62), every = Math.ceil(bk.length / 31);
+  const band = cw / bk.length, bw = Math.min(14, band * 0.72), every = Math.ceil(bk.length / 31);
+  const longLbl = k => bk.length <= 31 ? fmtDate(k.a, { weekday: 'short', month: 'short', day: 'numeric' }) : k.label;
   bk.forEach((k, i) => {
     const bh = maxH ? k.sec / 3600 / maxH * ch : 0, mid = cx + band * i + band / 2;
     if (bh > 0.2) { doc.setFillColor(139, 195, 74); doc.rect(mid - bw / 2, cy + ch - bh, bw, bh, 'F'); }
-    if (k.sec && bk.length <= 14) { doc.setTextColor(80); doc.text(fmtHMS(k.sec), mid, cy + ch - bh - 1.5, { align: 'center' }); }
-    if (i % every === 0) { doc.setTextColor(140); doc.text(k.label, mid, cy + ch + 4, { align: 'center' }); }
-  });
-  doc.setTextColor(0);
-
-  doc.autoTable({
-    startY: cy + ch + 10, head: [[groupLabel, 'Duration', 'Share']], styles: style, headStyles: head,
-    columnStyles: { 1: { halign: 'right', cellWidth: 25 }, 2: { halign: 'right', cellWidth: 22 } },
-    body: [...groupRows(entries, R.g1, secOf).map(r => [groupText(r, R.g1), fmtHMS(r.sec), `${total ? Math.round(r.sec / total * 100) : 0}%`]), ['Total', fmtHMS(total), '']],
-    didParseCell: c => {
-      if (c.section === 'head' && c.column.index > 0) c.cell.styles.halign = 'right';
-      if (c.section === 'body' && c.row.index === c.table.body.length - 1) c.cell.styles.fontStyle = 'bold';
+    if (k.sec && bk.length <= 10) { gray(80); doc.text(fmtHMS(k.sec), mid, cy + ch - bh - 1.5, { align: 'center' }); }
+    if (i % every === 0) {
+      // Schuin label (45°) dat eindigt onder de staaf, zoals Clockify
+      const t = longLbl(k), w = doc.getTextWidth(t), c = Math.SQRT1_2;
+      gray(90); doc.text(t, mid + 1 - w * c, cy + ch + 3 + w * c, { angle: 45 });
     }
   });
-  doc.autoTable({
-    startY: doc.lastAutoTable.finalY + 8, styles: style, headStyles: head,
-    head: [['Date', 'Time', 'Duration', 'User', 'Client', 'Project', 'Description', 'Tags']],
-    columnStyles: { 0: { cellWidth: 22 }, 1: { cellWidth: 22 }, 2: { halign: 'right', cellWidth: 18 } },
-    didParseCell: c => { if (c.section === 'head' && c.column.index === 2) c.cell.styles.halign = 'right'; },
-    body: [...entries].sort((a, b) => entryStart(a) - entryStart(b)).map(e => {
-      const p = projectOf(e);
-      return [fmtDate(entryStart(e), { day: '2-digit', month: '2-digit', year: 'numeric' }), `${hm(entryStart(e))}-${e.end_at ? hm(entryEnd(e)) : 'now'}`, fmtHMS(entrySec(e)),
-        entryUserName(e), clientOf(p)?.name || '', p?.name || '', e.description, tagNames(e.tag_ids).join(', ')];
-    })
-  });
+  let y = cy + ch + 24;
+
+  // Ring + lijst per groepering
+  const ring = (rows, ccx, ccy, r1, r2) => {
+    let a0 = -Math.PI / 2;
+    for (const r of rows) {
+      const a1 = a0 + (total ? r.sec / total : 0) * 2 * Math.PI, n = Math.max(2, Math.ceil((a1 - a0) / 0.05));
+      const pts = [];
+      for (let j = 0; j <= n; j++) { const a = a0 + (a1 - a0) * j / n; pts.push([ccx + r1 * Math.cos(a), ccy + r1 * Math.sin(a)]); }
+      for (let j = n; j >= 0; j--) { const a = a0 + (a1 - a0) * j / n; pts.push([ccx + r2 * Math.cos(a), ccy + r2 * Math.sin(a)]); }
+      doc.setFillColor(...rgb(r.color)); doc.setDrawColor(...rgb(r.color));
+      doc.lines(pts.slice(1).map((p, j) => [p[0] - pts[j][0], p[1] - pts[j][1]]), pts[0][0], pts[0][1], [1, 1], 'FD', true);
+      a0 = a1;
+    }
+    font(10); gray(30); doc.text(fmtHMS(total), ccx, ccy + 1.5, { align: 'center' });
+  };
+  const section = (group, label) => {
+    const rows = groupRows(entries, group, secOf).map((r, i) => ({ ...r, color: groupColor(group, r.k, i), name: groupText(r, group) + (group === 'project' && clientOf(byId(S.projects, r.k)) ? ' - ' + clientOf(byId(S.projects, r.k)).name : '') }));
+    const TOP = 10, shown = rows.slice(0, TOP), rest = rows.slice(TOP).reduce((t, r) => t + r.sec, 0);
+    if (rest) shown.push({ name: `Other (${rows.length - TOP})`, sec: rest, color: NO_PROJECT_COLOR });
+    const need = Math.max(62, shown.length * 7.5 + 16);
+    if (y + need > PH - 20) { doc.addPage(); y = 20; }
+    font(13); gray(30); doc.text(label, L, y); doc.setDrawColor(200); doc.line(L, y + 3, RX, y + 3);
+    ring(shown, L + 26, y + 32, 24, 15);
+    let ly = y + 12;
+    for (const r of shown) {
+      doc.setFillColor(...rgb(r.color)); doc.circle(70, ly - 1, 0.9, 'F');
+      font(8); gray(40); doc.text(fit(r.name, 88), 74, ly);
+      doc.text(fmtHMS(r.sec), 175, ly, { align: 'right' }); gray(130); doc.text(`${total ? (r.sec / total * 100).toFixed(2) : 0}%`, RX, ly, { align: 'right' });
+      doc.setDrawColor(225); doc.line(70, ly + 3, RX, ly + 3);
+      ly += 7.5;
+    }
+    y += need + 8;
+  };
+  const gLabel = g => GROUPS.find(x => x[0] === g)[1];
+  if (entries.length) { section(R.g1, gLabel(R.g1)); if (R.g2) section(R.g2, gLabel(R.g2)); }
+
+  // Tabel
+  const plain = { theme: 'plain', margin: { left: L, right: 15, bottom: 18 }, styles: { fontSize: 8.5, cellPadding: { top: 3, bottom: 3, left: 2, right: 2 }, textColor: 40, lineColor: 215, lineWidth: { bottom: 0.2 } },
+    headStyles: { textColor: 120, fontStyle: 'normal', fontSize: 8 } };
+  if (y > PH - 50) { doc.addPage(); y = 20; }
+  if (R.tab === 'detailed') {
+    doc.autoTable({ ...plain, startY: y,
+      head: [['Date', 'Time', 'Description', 'Project', 'User', 'Duration']],
+      columnStyles: { 0: { cellWidth: 20 }, 1: { cellWidth: 20 }, 5: { halign: 'right', cellWidth: 20 } },
+      didParseCell: c => { if (c.section === 'head' && c.column.index === 5) c.cell.styles.halign = 'right'; },
+      body: [...entries].sort((a, b) => entryStart(a) - entryStart(b)).map(e => {
+        const p = projectOf(e);
+        return [dmy(entryStart(e)), `${hm(entryStart(e))}-${e.end_at ? hm(entryEnd(e)) : 'now'}`, e.description + (tagNames(e.tag_ids).length ? ` [${tagNames(e.tag_ids).join(', ')}]` : ''),
+          p ? p.name + (clientOf(p) ? ' - ' + clientOf(p).name : '') : 'No project', entryUserName(e), fmtHMS(entrySec(e))];
+      }) });
+  } else {
+    const body = [];
+    for (const r of groupRows(entries, R.g1, secOf)) {
+      const p = R.g1 === 'project' && byId(S.projects, r.k);
+      body.push({ t: groupText(r, R.g1) + (p && clientOf(p) ? ' - ' + clientOf(p).name : ''), d: fmtHMS(r.sec), lvl: 1 });
+      if (R.g2) for (const c of groupRows(entries.filter(e => groupKeys(e, R.g1).includes(r.k)), R.g2, secOf)) body.push({ t: groupText(c, R.g2), d: fmtHMS(c.sec), lvl: 2 });
+    }
+    doc.autoTable({ ...plain, startY: y,
+      head: [[R.g2 ? `${gLabel(R.g1)} / ${gLabel(R.g2)}` : gLabel(R.g1), 'Duration']],
+      columnStyles: { 1: { halign: 'right', cellWidth: 30 } },
+      didParseCell: c => {
+        if (c.section === 'head' && c.column.index === 1) c.cell.styles.halign = 'right';
+        if (c.section === 'body' && body[c.row.index]?.lvl === 2) { c.cell.styles.textColor = 120; if (c.column.index === 0) c.cell.styles.cellPadding = { top: 3, bottom: 3, left: 8, right: 2 }; }
+      },
+      body: body.map(r => [r.t, r.d]) });
+  }
+
+  // Voettekst op elke pagina
   const pages = doc.getNumberOfPages();
-  for (let i = 1; i <= pages; i++) { doc.setPage(i); doc.setFontSize(8); doc.setTextColor(140); doc.text(`Page ${i} of ${pages}`, 283, 203, { align: 'right' }); }
-  doc.save(`polyfy-report-${ymd(from)}-to-${ymd(addDays(to, -1))}.pdf`);
+  for (let i = 1; i <= pages; i++) {
+    doc.setPage(i); font(8); gray(60);
+    doc.text(`POLYGON      Created with Polyfy      ${i}`, RX, PH - 10, { align: 'right' });
+  }
+  doc.save(`polyfy-${title.toLowerCase().replace(' ', '-')}-${ymd(from)}-to-${ymd(addDays(to, -1))}.pdf`);
 }
 
 function exportCsv(entries, from, to) {
@@ -1705,7 +1793,7 @@ async function renderTeam(page) {
         </tr>`;
       }).join('')}
       ${pending.map(w => `<tr data-pend="${esc(w.email)}"><td><span class="row" style="flex-wrap:nowrap">${avatar({ id: w.email, full_name: w.name || w.email })}<span>${esc(w.name || w.email)}<br><span class="muted small">${w.invited ? 'Invited, no account yet' : 'No account yet'}${w.entries ? ` · ${w.entries} imported time entries` : ''}</span></span></span></td>
-        <td>${esc(w.email)}</td><td>${roleTag(w.role)}</td>${isAdmin() ? `<td class="r">${w.invited ? `<button class="btn icon ghost" data-pmore aria-label="More">${icon('dots')}</button>` : ''}</td>` : ''}</tr>`).join('')}
+        <td>${esc(w.email)}</td><td>${roleTag(w.role)}</td>${isAdmin() ? `<td class="r"><button class="btn icon ghost" data-pmore aria-label="More">${icon('dots')}</button></td>` : ''}</tr>`).join('')}
       </tbody></table>` : '<div class="empty">No members found.</div>'}
     </div>`;
 
@@ -1728,24 +1816,33 @@ async function renderTeam(page) {
       $$('[data-v]', m).forEach(x => x.onclick = () => { closeMenu(); if (x.dataset.v !== p.role) saveProfile(p, { role: x.dataset.v }); });
     });
     const mo = $('[data-more]', tr);
-    mo.onclick = () => openMenu(mo, `<button class="mi" data-m="edit">Edit</button><button class="mi" data-m="rep">View report</button>${p.id !== S.me.id ? `<button class="mi ${p.active ? 'danger' : ''}" data-m="act">${p.active ? 'Deactivate' : 'Activate'}</button>` : ''}`, m => {
+    mo.onclick = () => openMenu(mo, `<button class="mi" data-m="edit">Edit</button><button class="mi" data-m="rep">View report</button>${p.id !== S.me.id ? `<button class="mi ${p.active ? 'danger' : ''}" data-m="act">${p.active ? 'Deactivate' : 'Activate'}</button><button class="mi danger" data-m="del">Delete</button>` : ''}`, m => {
       $$('[data-m]', m).forEach(x => x.onclick = () => {
         closeMenu();
         if (x.dataset.m === 'edit') return openMemberModal(p);
         if (x.dataset.m === 'rep') { Object.assign(S.rep, { user: p.id, project: '', client: '', tag: '', desc: '', g1: 'project', tab: 'summary' }); location.hash = 'reports'; return; }
+        if (x.dataset.m === 'del') return removeMember(p.email, p.full_name || p.email);
         if (p.active && !confirm(`Deactivate ${p.full_name || p.email}? They will no longer be able to log in and track time.`)) return;
         saveProfile(p, { active: !p.active });
       });
     });
   });
-  $$('tr[data-pend] [data-pmore]', page).forEach(b => b.onclick = () => openMenu(b, '<button class="mi danger" data-m="del">Revoke invite</button>', m => {
-    $('[data-m]', m).onclick = async () => {
+  $$('tr[data-pend] [data-pmore]', page).forEach(b => b.onclick = () => openMenu(b, '<button class="mi danger" data-m="del">Delete</button>', m => {
+    $('[data-m]', m).onclick = () => {
       closeMenu();
-      const { error } = await sb.from('invites').delete().eq('email', b.closest('tr').dataset.pend);
-      if (error) return fail(error);
-      toast('Invite revoked'); refreshPage();
+      const w = pending.find(x => x.email === b.closest('tr').dataset.pend);
+      removeMember(w.email, w.name || w.email);
     };
   }));
+}
+
+// Lid verwijderen (enkel admins, schema-v6): account/uitnodiging weg, uren blijven bewaard onder de naam
+async function removeMember(email, name) {
+  if (!confirm(`Delete ${name}?\n\nTheir account and place in the team are removed. Their tracked time is kept (under their name) so project totals stay correct.`)) return;
+  const { data, error } = await sb.rpc('remove_member', { p_email: email });
+  if (error) return fail(/function .*remove_member/i.test(error.message) ? new Error('Run supabase/schema-v6-leden-verwijderen.sql in Supabase first.') : error);
+  S.profiles = S.profiles.filter(p => lc(p.email) !== lc(email));
+  toast(`${name} deleted${data ? ` (${data} time entries kept)` : ''}`); refreshPage();
 }
 
 function openInviteModal() {
