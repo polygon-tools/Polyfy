@@ -692,7 +692,7 @@ function openEntryModal(entry, preset = {}) {
   let tagIds = [...(e.tag_ids || preset.tag_ids || [])];
   const m = openModal(entry ? 'Edit time entry' : 'Add time entry', `
     <label class="field">Description<input id="m-desc" value="${esc(e.description)}" placeholder="What have you worked on?"></label>
-    <label class="field">Project<select id="m-proj">${projectOptions(e.project_id || '')}</select></label>
+    <div class="field">Project<button type="button" class="btn projbtn mproj" id="m-proj">${projBtnHtml(e.project_id)}</button></div>
     ${S.tagsReady ? `<div class="field">Tags<button type="button" class="btn tagbtn" id="m-tags" style="justify-content:flex-start">${tagBtnHtml(tagIds)}</button></div>` : ''}
     ${canEditUser ? `<label class="field">Team member<select id="m-user">${S.profiles.filter(p => p.active).map(p => `<option value="${p.id}" ${p.id === e.user_id ? 'selected' : ''}>${esc(p.full_name || p.email)}</option>`).join('')}</select></label>` : ''}
     <div class="grid2">
@@ -721,14 +721,19 @@ function openEntryModal(entry, preset = {}) {
   };
   const upd = () => { const { s, en: x } = times(); $('#m-dur').textContent = fmtHM(((x || new Date()) - s) / 1000); };
   $$('#m-date,#m-start,#m-end', m).forEach(i => i.addEventListener('input', upd)); upd();
-  $('#m-proj').onchange = () => { const p = byId(S.projects, $('#m-proj').value); if (p) $('#m-bill').checked = p.billable; };
+  // Project kiezen met zoekfunctie (zelfde lijst als in de Time Tracker)
+  let projId = e.project_id || null;
+  $('#m-proj').onclick = () => pickProject($('#m-proj'), projId, pid => {
+    projId = pid; $('#m-proj').innerHTML = projBtnHtml(pid);
+    const p = byId(S.projects, pid); if (p) $('#m-bill').checked = p.billable;
+  });
   if (S.tagsReady) bindTagPicker($('#m-tags'), () => tagIds, ids => { tagIds = ids; });
 
   $('#m-save').onclick = async () => {
     const { s, en: x } = times();
     if (x && x - s > 24 * 3600000) return toast('A time entry can be at most 24 hours long.', true);
     const row = {
-      description: $('#m-desc').value.trim(), project_id: $('#m-proj').value || null,
+      description: $('#m-desc').value.trim(), project_id: projId,
       billable: $('#m-bill').checked, start_at: s.toISOString(), ...tagField(tagIds)
     };
     if (!running) row.end_at = x.toISOString();
@@ -1083,7 +1088,7 @@ async function renderCalendar(page) {
         ${daily.map((_, i) => `<div class="cal-col ${sameDay(addDays(from, i), today) ? 'today' : ''}" data-day="${i}" style="height:${24 * HP}px;--hp:${HP}px"></div>`).join('')}
       </div>
     </div>
-    <div class="muted small">Click an empty slot to add a time entry, click a block to edit it.</div>`;
+    <div class="muted small">Click or drag in an empty slot to add time, drag a block to move it, drag its bottom edge to make it longer or shorter, click a block to edit it.</div>`;
 
   // Blokken per dag positioneren, met kolommen voor overlappende registraties
   $$('.cal-col', page).forEach(col => {
@@ -1106,26 +1111,22 @@ async function renderCalendar(page) {
     col.innerHTML = segs.map(g => {
       const p = projectOf(g.e), color = p ? p.color : NO_PROJECT_COLOR;
       const top = (g.s - d0) / 3600000 * HP, h = Math.max(18, (g.t - g.s) / 3600000 * HP - 2), w = 100 / g.ncol;
-      return `<div class="cal-ev ${g.e.end_at ? '' : 'running'}" data-id="${g.e.id}" style="top:${top}px;height:${h}px;left:calc(${g.col * w}% + 2px);width:calc(${w}% - 4px);background:color-mix(in srgb, ${color} 18%, var(--surface));border-left:3px solid ${color}"
+      const drag = g.e.end_at && +g.s === +entryStart(g.e) && +g.t === +entryEnd(g.e) && (isAdmin() || g.e.user_id === S.me.id);
+      return `<div class="cal-ev ${g.e.end_at ? '' : 'running'}" data-id="${g.e.id}" ${drag ? 'data-drag="1"' : ''} style="top:${top}px;height:${h}px;left:calc(${g.col * w}% + 2px);width:calc(${w}% - 4px);background:color-mix(in srgb, ${color} 18%, var(--surface));border-left:3px solid ${color}"
         data-tip="<b>${esc(g.e.description || '(no description)')}</b><br>${esc(p?.name || 'No project')}${tagNames(g.e.tag_ids).length ? '<br>' + esc(tagNames(g.e.tag_ids).join(', ')) : ''}<br>${hm(entryStart(g.e))} – ${g.e.end_at ? hm(entryEnd(g.e)) : 'now'} · ${fmtHMS(entrySec(g.e))}">
         <div class="t">${esc(g.e.description || p?.name || '(no description)')}</div>
         ${h > 34 ? `<div class="s">${esc(g.e.description ? p?.name || 'No project' : clientOf(p)?.name || '')} · ${fmtHM((g.t - g.s) / 1000)}</div>` : ''}
+        ${drag ? '<div class="rz" title="Drag to change the end time"></div>' : ''}
       </div>`;
     }).join('');
     if (sameDay(d0, today)) {
       const now = new Date();
       col.insertAdjacentHTML('beforeend', `<div class="now-line" style="top:${(now - d0) / 3600000 * HP}px"></div>`);
     }
-    col.addEventListener('click', ev => {
-      const evEl = ev.target.closest('.cal-ev');
-      if (evEl) { openEntryModal(entries.find(x => x.id === evEl.dataset.id)); return; }
-      const mins = Math.floor((ev.offsetY / HP) * 60 / 15) * 15;
-      const s = new Date(d0); s.setMinutes(mins);
-      openEntryModal(null, { start: s.getTime(), end: s.getTime() + 3600000, user_id: uid });
-    });
   });
 
   const sc = $('#cal-scroll');
+  bindCalendarDrag(sc, entries, from, HP, uid);
   const firstHour = entries.length ? Math.min(...entries.map(e => new Date(Math.max(from, entryStart(e))).getHours())) : 8;
   sc.scrollTop = Math.max(0, Math.min(8, firstHour) * HP - 8);
 
@@ -1138,6 +1139,85 @@ async function renderCalendar(page) {
   bindRange(page, from, to, a => { C.from = C.mode === 'day' ? a : startOfWeek(a); refreshPage(); });
   if ($('#c-user')) $('#c-user').onclick = () => pickFrom($('#c-user'), S.profiles.filter(p => p.active).map(p => ({ id: p.id, label: p.full_name || p.email, extra: p.id === S.me.id ? '(you)' : '' })), uid,
     v => { C.user = v || S.me.id; refreshPage(); }, { placeholder: 'Search teammates' });
+}
+
+// Slepen in de Calendar (zoals Clockify), per kwartier:
+// - leeg vak: klik = blok van 1 uur, klik + sleep = blok van die tijd
+// - blok: klik = bewerken, slepen = verplaatsen (ook naar een andere dag), onderrand slepen = langer/korter
+function bindCalendarDrag(sc, entries, from, HP, uid) {
+  const Q = 15, cols = $$('.cal-col', sc);
+  const snap = min => Math.round(min / Q) * Q;
+  const colIndexAt = x => cols.findIndex(c => { const r = c.getBoundingClientRect(); return x >= r.left && x < r.right; });
+  const minAt = (col, y) => Math.max(0, Math.min(24 * 60, (y - col.getBoundingClientRect().top) / HP * 60));
+  const atMin = (day, min) => { const d = addDays(from, day); d.setHours(0, min, 0, 0); return d; };
+  const save = async (e, start, end) => {
+    if (end - start > 24 * 3600000) { toast('A time entry can be at most 24 hours long.', true); return refreshPage(); }
+    const { error } = await sb.from('time_entries').update({ start_at: start.toISOString(), end_at: end.toISOString() }).eq('id', e.id);
+    if (error) fail(error); else toast('Time entry updated');
+    refreshPage();
+  };
+
+  sc.addEventListener('pointerdown', ev => {
+    if (ev.button !== 0) return;
+    const col = ev.target.closest('.cal-col'); if (!col) return;
+    const evEl = ev.target.closest('.cal-ev'), day0 = cols.indexOf(col);
+    const entry = evEl && entries.find(x => x.id === evEl.dataset.id);
+    const touch = ev.pointerType === 'touch';  // op gsm: tikken = klikken, slepen = scrollen
+    const mode = evEl ? (!touch && evEl.dataset.drag ? (ev.target.classList.contains('rz') ? 'resize' : 'move') : 'click') : (touch ? 'click' : 'create');
+    const m0 = minAt(col, ev.clientY);
+    const orig = evEl && { top: evEl.offsetTop, h: evEl.offsetHeight, parent: evEl.parentElement, left: evEl.style.left, width: evEl.style.width };
+    let moved = false, ghost = null, dMin = 0, dDay = 0, c0 = snap(m0), c1 = c0;
+    if (!touch) ev.preventDefault();
+
+    const onMove = mv => {
+      if (!moved && Math.hypot(mv.clientX - ev.clientX, mv.clientY - ev.clientY) < 5) return;
+      moved = true;
+      if (mode === 'click') return;
+      if (mode === 'create') {
+        const m1 = minAt(col, mv.clientY);
+        c0 = snap(Math.min(m0, m1)); c1 = Math.max(c0 + Q, snap(Math.max(m0, m1)));
+        if (!ghost) { ghost = document.createElement('div'); ghost.className = 'cal-ev ghost'; col.appendChild(ghost); }
+        ghost.style.top = c0 / 60 * HP + 'px'; ghost.style.height = (c1 - c0) / 60 * HP + 'px';
+        ghost.textContent = `${pad(Math.floor(c0 / 60))}:${pad(c0 % 60)} – ${pad(Math.floor(c1 / 60) % 24)}:${pad(c1 % 60)}`;
+        return;
+      }
+      dMin = snap((mv.clientY - ev.clientY) / HP * 60);
+      if (mode === 'resize') {
+        const minLen = Q / 60 * HP;
+        evEl.style.height = Math.max(minLen, orig.h + dMin / 60 * HP) + 'px';
+        return;
+      }
+      const ci = colIndexAt(mv.clientX); dDay = ci < 0 ? dDay : ci - day0;
+      const target = cols[day0 + dDay] || orig.parent;
+      if (evEl.parentElement !== target) { target.appendChild(evEl); evEl.style.left = '2px'; evEl.style.width = 'calc(100% - 4px)'; }
+      evEl.style.top = orig.top + dMin / 60 * HP + 'px';
+      evEl.classList.add('dragging');
+    };
+    const onUp = () => {
+      document.removeEventListener('pointermove', onMove);
+      document.removeEventListener('pointerup', onUp);
+      document.removeEventListener('pointercancel', onCancel);
+      if (!moved || mode === 'click') {
+        if (moved) return;  // bv. scrollen op gsm
+        if (entry) return openEntryModal(entry);
+        const st = atMin(day0, Math.floor(m0 / Q) * Q);
+        return openEntryModal(null, { start: st.getTime(), end: st.getTime() + 3600000, user_id: uid });
+      }
+      if (mode === 'create') {
+        ghost?.remove();
+        return openEntryModal(null, { start: atMin(day0, c0).getTime(), end: atMin(day0, c1).getTime(), user_id: uid });
+      }
+      const s0 = entryStart(entry), e0 = entryEnd(entry);
+      if (mode === 'resize') return save(entry, s0, new Date(Math.max(s0.getTime() + Q * 60000, e0.getTime() + dMin * 60000)));
+      if (!dMin && !dDay) return refreshPage();
+      const ns = addDays(s0, dDay); ns.setMinutes(ns.getMinutes() + dMin);
+      save(entry, ns, new Date(ns.getTime() + (e0 - s0)));
+    };
+    const onCancel = () => { document.removeEventListener('pointermove', onMove); document.removeEventListener('pointerup', onUp); document.removeEventListener('pointercancel', onCancel); ghost?.remove(); if (moved && orig) refreshPage(); };
+    document.addEventListener('pointermove', onMove);
+    document.addEventListener('pointerup', onUp);
+    document.addEventListener('pointercancel', onCancel);
+  });
 }
 
 // =====================================================================
@@ -1323,8 +1403,26 @@ async function exportPdf(entries, from, to) {
   doc.text(`Total ${fmtHMS(total)} (${fmtDec(total)} h)   |   ${entries.length} time entries   |   created ${d(new Date())}`, 14, 29);
   doc.setTextColor(0);
 
+  // Grafiek zoals op de Reports-pagina: groene staven per dag/week/maand
+  const bk = buckets(from, to).map(k => ({ ...k, sec: entries.reduce((t, e) => t + clipSec(e, k.a, k.b), 0) }));
+  const cx = 24, cy = 36, cw = 259, ch = 52, maxH = niceMax(Math.max(...bk.map(k => k.sec / 3600)));
+  doc.setFontSize(7); doc.setDrawColor(225); doc.setTextColor(140);
+  for (let i = 0; i <= 4; i++) {
+    const y = cy + ch - ch * i / 4;
+    doc.line(cx, y, cx + cw, y);
+    doc.text(`${(maxH * i / 4).toLocaleString('en-US')}h`, cx - 2, y + 1, { align: 'right' });
+  }
+  const band = cw / bk.length, bw = Math.min(16, band * 0.62), every = Math.ceil(bk.length / 31);
+  bk.forEach((k, i) => {
+    const bh = maxH ? k.sec / 3600 / maxH * ch : 0, mid = cx + band * i + band / 2;
+    if (bh > 0.2) { doc.setFillColor(139, 195, 74); doc.rect(mid - bw / 2, cy + ch - bh, bw, bh, 'F'); }
+    if (k.sec && bk.length <= 14) { doc.setTextColor(80); doc.text(fmtHMS(k.sec), mid, cy + ch - bh - 1.5, { align: 'center' }); }
+    if (i % every === 0) { doc.setTextColor(140); doc.text(k.label, mid, cy + ch + 4, { align: 'center' }); }
+  });
+  doc.setTextColor(0);
+
   doc.autoTable({
-    startY: 35, head: [[groupLabel, 'Duration', 'Share']], styles: style, headStyles: head,
+    startY: cy + ch + 10, head: [[groupLabel, 'Duration', 'Share']], styles: style, headStyles: head,
     columnStyles: { 1: { halign: 'right', cellWidth: 25 }, 2: { halign: 'right', cellWidth: 22 } },
     body: [...groupRows(entries, R.g1, secOf).map(r => [groupText(r, R.g1), fmtHMS(r.sec), `${total ? Math.round(r.sec / total * 100) : 0}%`]), ['Total', fmtHMS(total), '']],
     didParseCell: c => {

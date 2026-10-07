@@ -101,7 +101,9 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--accent)}
 label.field,div.field{display:flex;flex-direction:column;gap:4px;font-size:12px;font-weight:500;color:var(--text-2)}
 label.check{display:inline-flex;align-items:center;gap:8px;cursor:pointer}
 .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
-.grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.grid2{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px}
+.grid2>*{min-width:0}
+label.field>input,label.field>select{width:100%}
 .seg{display:inline-flex;border:1px solid var(--line-strong);border-radius:var(--r-sm);overflow:hidden}
 .seg button{border:0;background:var(--surface);padding:7px 12px;font:500 13px var(--font);color:var(--text-2);cursor:pointer}
 .seg button+button{border-left:1px solid var(--line-strong)}
@@ -196,6 +198,13 @@ td.r,th.r{text-align:right}
 .cal-ev .t{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .cal-ev .s{color:var(--text-2);font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .cal-ev.running{border:1px dashed var(--accent)}
+.cal-ev[data-drag]{cursor:grab;touch-action:pan-y}
+.cal-ev.dragging{cursor:grabbing;opacity:.85;box-shadow:var(--shadow-lg);z-index:5}
+.cal-ev .rz{position:absolute;left:0;right:0;bottom:0;height:7px;cursor:ns-resize}
+.cal-ev .rz::after{content:'';position:absolute;left:50%;bottom:2px;width:18px;margin-left:-9px;height:2px;border-radius:1px;background:currentColor;opacity:0;transition:opacity .1s}
+.cal-ev:hover .rz::after{opacity:.4}
+.cal-ev.ghost{left:2px;width:calc(100% - 4px);background:var(--accent-soft);border:1px dashed var(--accent);color:var(--accent);font-weight:500;pointer-events:none;z-index:6}
+.cal-col{user-select:none}
 .now-line{position:absolute;left:0;right:0;height:2px;background:var(--bad);z-index:4;pointer-events:none}
 .now-line::before{content:'';position:absolute;left:-4px;top:-3px;width:8px;height:8px;border-radius:50%;background:var(--bad)}
 
@@ -242,6 +251,7 @@ table.weekly tfoot th{border-top:1px solid var(--line-strong)}
 
 /* ---------- Time Tracker ---------- */
 .projbtn,.te-proj{max-width:280px;color:var(--accent);font-weight:500}
+.projbtn.mproj{max-width:none;justify-content:flex-start;border-color:var(--line-strong);background:var(--surface)}
 .projbtn span,.te-proj span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .projbtn .pn,.te-proj .pn{font-weight:500}
 .tb-times{display:inline-flex;align-items:center;gap:4px}
