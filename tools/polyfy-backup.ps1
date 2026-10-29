@@ -21,6 +21,7 @@
 param([switch]$Install, [switch]$Uninstall, [switch]$Now, [string]$Folder)
 
 $ErrorActionPreference = 'Stop'
+$ProgressPreference = 'SilentlyContinue'   # de voortgangsbalk maakt downloads in PowerShell 5.1 erg traag
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 $Url = 'https://yufmwzrtsznvjfijwvur.supabase.co'
 $Key = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inl1Zm13enJ0c3pudmpmaWp3dnVyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTEyODYyMTIsImV4cCI6MjEwNjg2MjIxMn0.QooQ-wfuI1Wtlu0lzNXQF7s74HsNwYHqIEe9P8IV2Zk'
