@@ -54,6 +54,17 @@ Nieuwe functies die de database wijzigen komen als apart script in `supabase/`. 
    Opnieuw uitvoeren is veilig: wat er al is, wordt overgeslagen.
 3. Collega's maken zelf een account met hetzelfde e-mailadres als in Clockify. Bij het inloggen komen hun uren automatisch bij hen te staan.
 
+## Maandelijkse back-up (Windows)
+
+`tools/polyfy-backup.ps1` haalt elke maand automatisch alle gegevens op (alle medewerkers) en bewaart ze als zip in *Documenten\Polyfy-backups*: `registraties.csv` (leesbaar in Excel) plus de volledige tabellen als JSON. Eenmalig installeren in PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/polygon-tools/Polyfy/main/tools/polyfy-backup.ps1 -OutFile $env:TEMP\polyfy-backup.ps1
+powershell -ExecutionPolicy Bypass -File $env:TEMP\polyfy-backup.ps1 -Install
+```
+
+Het vraagt het e-mailadres en wachtwoord van een beheerdersaccount (versleuteld bewaard voor je Windows-gebruiker) en maakt een geplande taak die dagelijks kijkt of de back-up van de maand al bestaat. Mislukt het, dan verschijnt `LAATSTE-BACKUP-MISLUKT.txt` in de back-upmap.
+
 ## Lokaal testen
 
 Het is pure HTML/JS zonder build-stap:
