@@ -198,6 +198,10 @@ td.r,th.r{text-align:right}
 .cal-ev .t{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .cal-ev .s{color:var(--text-2);font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .cal-ev.running{border:1px dashed var(--accent)}
+.cal-ev.sm{padding:1px 6px;font-size:11px}
+.cal-ev.sm .t{line-height:1.2}
+.cal-ev.xs{padding:0 6px;font-size:10px;line-height:1}
+.cal-ev.xs .t{line-height:inherit;margin-top:-1px}
 .cal-ev[data-drag]{cursor:grab;touch-action:pan-y}
 .cal-ev.dragging{cursor:grabbing;opacity:.85;box-shadow:var(--shadow-lg);z-index:5}
 .cal-ev .rz{position:absolute;left:0;right:0;bottom:0;height:7px;cursor:ns-resize}
@@ -228,6 +232,12 @@ td.r,th.r{text-align:right}
 .mi.on{background:var(--accent-soft);color:var(--accent)}
 .mi.danger{color:var(--bad)}
 .mi svg{width:16px;height:16px}
+.mi-l{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mi .star{display:flex;color:var(--muted);opacity:0;padding:2px;margin:-2px -2px -2px 0;border-radius:2px}
+.mi:hover .star,.mi .star.on{opacity:1}
+.mi .star:hover{color:#f5b301}
+.mi .star.on{color:#f5b301}
+.mi .star.on svg{fill:currentColor}
 .mempty{padding:10px 8px 8px;color:var(--text)}
 .mempty small{display:block;margin-top:4px;color:var(--muted);font-size:12px}
 .mempty a{color:var(--accent);text-decoration:none}

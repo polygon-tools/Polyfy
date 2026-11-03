@@ -186,10 +186,22 @@ async function loadBase() {
   // Tags bestaan pas na schema-v2-tags-import.sql; zonder die tabel werkt de rest gewoon verder.
   const tg = await sb.from('tags').select('*').order('name');
   S.tagsReady = !tg.error; S.tags = tg.data || [];
+  S.favs = new Set(favColumn() ? S.me.favorite_projects || [] : (() => { try { return JSON.parse(localStorage.getItem('polyfy-favs-' + S.me.id)) || []; } catch (_) { return []; } })());
+}
+// Favoriete projecten (ster): bewaard in profiles.favorite_projects (schema-v8), zonder v8 enkel in deze browser
+const favColumn = () => S.me && 'favorite_projects' in S.me;
+async function toggleFav(pid) {
+  S.favs.has(pid) ? S.favs.delete(pid) : S.favs.add(pid);
+  const ids = [...S.favs];
+  if (!favColumn()) { try { localStorage.setItem('polyfy-favs-' + S.me.id, JSON.stringify(ids)); } catch (_) {} return; }
+  const { error } = await sb.from('profiles').update({ favorite_projects: ids }).eq('id', S.me.id);
+  if (error) return fail(error);
+  S.me.favorite_projects = ids;
 }
 
 // ---------- Iconen ----------
 const I = {
+  star: '<path d="M12 3l2.8 5.7 6.2.9-4.5 4.4 1.1 6.2L12 17.3 6.4 20.2l1.1-6.2L3 9.6l6.2-.9z"/>',
   dash: '<path d="M3 13h8V3H3zM13 21h8V11h-8zM3 21h8v-6H3zM13 3v6h8V3z"/>',
   cal: '<rect x="3" y="4" width="18" height="17" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/>',
   rep: '<path d="M3 3v18h18"/><path d="M7 15v3M12 9v9M17 5v13"/>',
@@ -543,7 +555,8 @@ addEventListener('scroll', e => { if (!e.target.closest?.('#menu')) closeMenu();
 
 // Keuzelijst met zoekveld. items: [{ id, label, dot?, group? }]; id '' = "alle"/"geen".
 // create: { noun, form(m, name, done), quick(name) } -> "Create new …" onderaan en Ctrl+Enter (zoals Clockify)
-function pickFrom(anchor, items, current, onPick, { placeholder = 'Search…', emptyLabel = null, cls = '', create = null } = {}) {
+// star: { isFav(id), toggle(id) } -> ster per item en favorieten bovenaan (ook bij zoeken)
+function pickFrom(anchor, items, current, onPick, { placeholder = 'Search…', emptyLabel = null, cls = '', create = null, star = null } = {}) {
   openMenu(anchor, `<input placeholder="${esc(placeholder)}" aria-label="Search" autocomplete="off"><div class="list"></div>${create ? `<button type="button" class="mcreate">${icon('plus')}Create new ${esc(create.noun)}</button>` : ''}`, m => {
     const inp = $('input', m), list = $('.list', m);
     const done = id => { closeMenu(); if (id) onPick(id); };
@@ -551,13 +564,21 @@ function pickFrom(anchor, items, current, onPick, { placeholder = 'Search…', e
       const raw = inp.value.trim(), q = raw.toLowerCase();
       const hits = items.filter(x => !q || (x.label + ' ' + (x.group || '')).toLowerCase().includes(q));
       let html = emptyLabel && !q ? `<button class="mi ${!current ? 'on' : ''}" data-v="">${esc(emptyLabel)}</button>` : '', grp = null;
+      const item = (x, extra) => `<button class="mi ${x.id === current ? 'on' : ''}" data-v="${esc(x.id)}">${x.dot ? `<span class="dot" style="background:${esc(x.dot)}"></span>` : ''}<span class="mi-l">${esc(x.label)}${extra ? ` <span class="muted">${esc(extra)}</span>` : ''}</span>${star ? `<span class="star ${star.isFav(x.id) ? 'on' : ''}" data-star="${esc(x.id)}" title="${star.isFav(x.id) ? 'Remove from favorites' : 'Add to favorites'}">${icon('star')}</span>` : ''}</button>`;
+      const favs = star ? hits.filter(x => star.isFav(x.id)) : [];
+      if (favs.length) html += `<div class="mh">Favorites</div>` + favs.map(x => item(x, [x.group, x.extra].filter(Boolean).join(' · '))).join('');
       for (const x of hits) {
+        if (favs.includes(x)) continue;
         if (x.group !== undefined && x.group !== grp) { grp = x.group; html += `<div class="mh">${esc(grp)}</div>`; }
-        html += `<button class="mi ${x.id === current ? 'on' : ''}" data-v="${esc(x.id)}">${x.dot ? `<span class="dot" style="background:${esc(x.dot)}"></span>` : ''}${esc(x.label)}${x.extra ? ` <span class="muted">${esc(x.extra)}</span>` : ''}</button>`;
+        html += item(x, x.extra);
       }
       const noun = create ? create.noun.toLowerCase() + 's' : 'results';
       list.innerHTML = html || `<div class="mempty">No matching ${esc(noun)}${create && raw ? `<small>Press Ctrl+Enter to quickly <a href="#" data-quick>create '${esc(raw)}' ${esc(create.noun)}</a>.</small>` : ''}</div>`;
-      $$('[data-v]', list).forEach(b => b.onclick = () => { closeMenu(); onPick(b.dataset.v || null); });
+      $$('[data-v]', list).forEach(b => b.onclick = ev => {
+        const st = ev.target.closest('[data-star]');
+        if (st) { star.toggle(st.dataset.star); const y = list.scrollTop; draw(); list.scrollTop = y; return; }
+        closeMenu(); onPick(b.dataset.v || null);
+      });
       $('[data-quick]', list)?.addEventListener('click', ev => { ev.preventDefault(); quick(); });
     };
     const quick = async () => { const raw = inp.value.trim(); if (create && raw) done(await create.quick(raw)); };
@@ -571,7 +592,7 @@ function pickProject(anchor, current, onPick, { emptyLabel = 'No project', inclu
   const items = S.projects.filter(p => includeArchived || !p.archived || p.id === current)
     .map(p => ({ id: p.id, label: p.name, dot: p.color, group: clientOf(p)?.name || 'Without client', extra: p.archived ? '(archived)' : '' }))
     .sort((a, b) => a.group.localeCompare(b.group) || a.label.localeCompare(b.label));
-  pickFrom(anchor, items, current, onPick, { placeholder: 'Search project or client', emptyLabel, cls: 'wide', create: canCreate && {
+  pickFrom(anchor, items, current, onPick, { placeholder: 'Search project or client', emptyLabel, cls: 'wide', star: { isFav: id => S.favs.has(id), toggle: toggleFav }, create: canCreate && {
     noun: 'Project', quick: name => createProject(name, null),
     form: (m, name, done) => {
       m.innerHTML = `<div class="mform"><div class="mh">Create new project</div>
@@ -1124,6 +1145,18 @@ async function renderDashboard(page) {
 // =====================================================================
 // Calendar (week of dag, zoom, collega kiezen)
 // =====================================================================
+// Rode lijn "nu" (en lopende timer) in de Calendar: elke 30 s bijwerken zonder te herladen
+function placeNowLine() {
+  const sc = $('#cal-scroll'); if (!sc || S.view !== 'calendar') return;
+  const now = new Date(), HP = S.cal.zoom;
+  $$('.now-line', sc).forEach(x => x.remove());
+  const col = $$('.cal-col', sc).find(c => sameDay(addDays(S.cal.from, Number(c.dataset.day)), now));
+  if (col) col.insertAdjacentHTML('beforeend', `<div class="now-line" style="top:${(now - startOfDay(now)) / 3600000 * HP}px"></div>`);
+  $$('.cal-ev[data-run]', sc).forEach(b => { b.style.height = Math.max(4, (now - Number(b.dataset.run)) / 3600000 * HP - 2) + 'px'; });
+}
+setInterval(placeNowLine, 30000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) placeNowLine(); });
+
 async function renderCalendar(page) {
   const C = S.cal, today = startOfDay(new Date());
   if (!C.from) C.from = startOfWeek(today);
@@ -1173,20 +1206,19 @@ async function renderCalendar(page) {
     flush();
     col.innerHTML = segs.map(g => {
       const p = projectOf(g.e), color = p ? p.color : NO_PROJECT_COLOR;
-      const top = (g.s - d0) / 3600000 * HP, h = Math.max(18, (g.t - g.s) / 3600000 * HP - 2), w = 100 / g.ncol;
+      const top = (g.s - d0) / 3600000 * HP, h = Math.max(4, (g.t - g.s) / 3600000 * HP - 2), w = 100 / g.ncol;
       const drag = g.e.end_at && +g.s === +entryStart(g.e) && +g.t === +entryEnd(g.e) && (isAdmin() || g.e.user_id === S.me.id);
-      return `<div class="cal-ev ${g.e.end_at ? '' : 'running'}" data-id="${g.e.id}" ${drag ? 'data-drag="1"' : ''} style="top:${top}px;height:${h}px;left:calc(${g.col * w}% + 2px);width:calc(${w}% - 4px);background:color-mix(in srgb, ${color} 18%, var(--surface));border-left:3px solid ${color}"
+      // Kort blok (bv. 15 min): één regel, kleiner, zodat het niet over het volgende blok loopt
+      const size = h < 16 ? 'xs' : h < 30 ? 'sm' : '';
+      return `<div class="cal-ev ${g.e.end_at ? '' : 'running'} ${size}" data-id="${g.e.id}" ${drag ? 'data-drag="1"' : ''} ${g.e.end_at ? '' : `data-run="${+g.s}"`} style="top:${top}px;height:${h}px;left:calc(${g.col * w}% + 2px);width:calc(${w}% - 4px);background:color-mix(in srgb, ${color} 18%, var(--surface));border-left:3px solid ${color}"
         data-tip="<b>${esc(g.e.description || '(no description)')}</b><br>${esc(p?.name || 'No project')}${tagNames(g.e.tag_ids).length ? '<br>' + esc(tagNames(g.e.tag_ids).join(', ')) : ''}<br>${hm(entryStart(g.e))} – ${g.e.end_at ? hm(entryEnd(g.e)) : 'now'} · ${fmtHMS(entrySec(g.e))}">
-        <div class="t">${esc(g.e.description || p?.name || '(no description)')}</div>
+        ${h < 8 ? '' : `<div class="t">${esc(g.e.description || p?.name || '(no description)')}</div>`}
         ${h > 34 ? `<div class="s">${esc(g.e.description ? p?.name || 'No project' : clientOf(p)?.name || '')} · ${fmtHM((g.t - g.s) / 1000)}</div>` : ''}
         ${drag ? '<div class="rz" title="Drag to change the end time"></div>' : ''}
       </div>`;
     }).join('');
-    if (sameDay(d0, today)) {
-      const now = new Date();
-      col.insertAdjacentHTML('beforeend', `<div class="now-line" style="top:${(now - d0) / 3600000 * HP}px"></div>`);
-    }
   });
+  placeNowLine();
 
   const sc = $('#cal-scroll');
   bindCalendarDrag(sc, entries, from, HP, uid);
