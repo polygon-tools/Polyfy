@@ -36,6 +36,8 @@ const $$ = (sel, el = document) => [...el.querySelectorAll(sel)];
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const pad = n => String(n).padStart(2, '0');
 const isAdmin = () => S.me?.role === 'admin';
+// Project aanpassen: beheerders alles, anderen enkel wat ze zelf gemaakt hebben (schema-v9: projects.created_by)
+const canEditProject = p => isAdmin() || (!!p?.created_by && p.created_by === S.me?.id);
 const byId = (list, id) => list.find(x => x.id === id);
 const lc = v => String(v ?? '').trim().toLowerCase();
 const debounce = (fn, ms) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
@@ -598,21 +600,23 @@ function pickProject(anchor, current, onPick, { emptyLabel = 'No project', inclu
       m.innerHTML = `<div class="mform"><div class="mh">Create new project</div>
         <input id="np-name" placeholder="Enter project name" value="${esc(name)}" autocomplete="off" aria-label="Project name">
         <select id="np-client" aria-label="Client"><option value="">No client</option>${S.clients.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select>
+        <div class="swatches">${PROJECT_COLORS.map((c, i) => `<button type="button" class="swatch ${i === S.projects.length % PROJECT_COLORS.length ? 'on' : ''}" data-c="${c}" style="background:${c}" aria-label="Color ${c}"></button>`).join('')}</div>
         <div class="row" style="justify-content:flex-end"><button type="button" class="linkbtn" id="np-cancel">Cancel</button><button type="button" class="btn primary" id="np-go">Create</button></div></div>`;
       const go = async () => {
         const n = $('#np-name', m).value.trim(); if (!n) return toast('Enter a project name.', true);
-        const id = await createProject(n, $('#np-client', m).value || null); if (id) done(id);
+        const id = await createProject(n, $('#np-client', m).value || null, $('.swatch.on', m)?.dataset.c); if (id) done(id);
       };
+      $$('.swatch', m).forEach(x => x.onclick = () => $$('.swatch', m).forEach(y => y.classList.toggle('on', y === x)));
       $('#np-go', m).onclick = go; $('#np-cancel', m).onclick = closeMenu;
       $('#np-name', m).onkeydown = ev => { if (ev.key === 'Enter') go(); };
       $('#np-name', m).focus();
     } } });
 }
 // Nieuw project (iedereen mag, zie schema-v7); bestaat het al, dan wordt dat gekozen
-async function createProject(name, clientId) {
+async function createProject(name, clientId, color) {
   const old = S.projects.find(p => lc(p.name) === lc(name) && (p.client_id || null) === clientId);
   if (old) return old.id;
-  const { data, error } = await sb.from('projects').insert({ name, client_id: clientId, color: PROJECT_COLORS[S.projects.length % PROJECT_COLORS.length] }).select().single();
+  const { data, error } = await sb.from('projects').insert({ name, client_id: clientId, color: color || PROJECT_COLORS[S.projects.length % PROJECT_COLORS.length] }).select().single();
   if (error) { fail(/row-level security/i.test(error.message) ? new Error('Run supabase/schema-v7-projecten-aanmaken.sql in Supabase first.') : error); return null; }
   S.projects.push(data); S.projects.sort((a, b) => a.name.localeCompare(b.name));
   toast(`Project "${name}" created`);
@@ -1641,7 +1645,7 @@ async function renderProjects(page) {
   const sortTh = (k, label, cls = '') => `<th class="${cls}"><button class="sortbtn ${P.sort === k ? 'on' : ''}" data-sort="${k}">${label}<span class="arr">${P.sort === k ? (P.dir > 0 ? '▲' : '▼') : '▲▼'}</span></button></th>`;
 
   page.innerHTML = `
-    <div class="page-head"><div><h1>Projects</h1><div class="muted">${list.length} of ${S.projects.length} projects</div></div>${isAdmin() ? `<button class="btn primary" id="p-new">Create new project</button>` : ''}</div>
+    <div class="page-head"><div><h1>Projects</h1><div class="muted">${list.length} of ${S.projects.length} projects</div></div><button class="btn primary" id="p-new">Create new project</button></div>
     <div class="row">
       <input id="p-search" placeholder="Search by name" value="${esc(P.search)}" style="min-width:240px">
       <select id="p-client" aria-label="Client"><option value="">All clients</option><option value="__none" ${P.client === '__none' ? 'selected' : ''}>Without client</option>${S.clients.map(c => `<option value="${c.id}" ${c.id === P.client ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select>
@@ -1649,13 +1653,13 @@ async function renderProjects(page) {
       <div class="seg" id="p-sort" title="Sort by name"><button data-az="1" class="${P.sort === 'name' && P.dir > 0 ? 'on' : ''}">A-Z</button><button data-az="-1" class="${P.sort === 'name' && P.dir < 0 ? 'on' : ''}">Z-A</button></div>
     </div>
     <div class="card table-wrap">
-      ${list.length ? `<table><thead><tr>${sortTh('name', 'Name')}${sortTh('client', 'Client')}${sortTh('tracked', 'Tracked', 'r')}${isAdmin() ? '<th></th>' : ''}</tr></thead><tbody>
+      ${list.length ? `<table><thead><tr>${sortTh('name', 'Name')}${sortTh('client', 'Client')}${sortTh('tracked', 'Tracked', 'r')}<th></th></tr></thead><tbody>
       ${list.map(p => `<tr data-id="${p.id}">
           <td><a href="#reports" data-rep class="proj" style="color:var(--text);text-decoration:none"><span class="dot" style="background:${esc(p.color)}"></span>${esc(p.name)}</a>${p.archived ? ' <span class="tag">archived</span>' : ''}</td>
           <td>${esc(clientOf(p)?.name || '–')}</td>
           <td class="r num"><b>${fmtHM(Number(tot.get(p.id)?.total_seconds || 0))}</b></td>
-          ${isAdmin() ? `<td class="r"><button class="btn icon ghost" data-edit aria-label="Edit">${icon('edit')}</button></td>` : ''}
-        </tr>`).join('')}</tbody></table>` : `<div class="empty">${S.projects.length ? 'No projects found.' : isAdmin() ? 'No projects yet. Create your first project.' : 'There are no projects yet. Ask an admin to create them.'}</div>`}
+          <td class="r">${canEditProject(p) ? `<button class="btn icon ghost" data-edit aria-label="Edit project" title="Edit name, client and color">${icon('edit')}</button>` : ''}</td>
+        </tr>`).join('')}</tbody></table>` : `<div class="empty">${S.projects.length ? 'No projects found.' : 'No projects yet. Create your first project.'}</div>`}
     </div>`;
 
   const search = $('#p-search');
@@ -1668,10 +1672,8 @@ async function renderProjects(page) {
     const [from, to] = rangeOf('year');
     Object.assign(S.rep, { project: a.closest('tr').dataset.id, client: '', tag: '', desc: '', from, to, tab: 'summary', g1: isAdmin() ? 'user' : 'day', g2: '' });
   });
-  if (isAdmin()) {
-    $('#p-new').onclick = () => openProjectModal(null);
-    $$('[data-edit]').forEach(b => b.onclick = () => openProjectModal(byId(S.projects, b.closest('tr').dataset.id)));
-  }
+  $('#p-new').onclick = () => openProjectModal(null);
+  $$('[data-edit]').forEach(b => b.onclick = () => openProjectModal(byId(S.projects, b.closest('tr').dataset.id)));
 }
 
 // =====================================================================
@@ -1747,10 +1749,10 @@ function openProjectModal(p) {
   let color = cur.color;
   const m = openModal(p ? 'Edit project' : 'Create new project', `
     <label class="field">Name<input id="pm-name" value="${esc(cur.name)}" required></label>
-    <label class="field">Client<select id="pm-client"><option value="">Without client</option>${S.clients.filter(c => !c.archived || c.id === cur.client_id).map(c => `<option value="${c.id}" ${c.id === cur.client_id ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}<option value="__new">+ Create new client…</option></select></label>
+    <label class="field">Client<select id="pm-client"><option value="">Without client</option>${S.clients.filter(c => !c.archived || c.id === cur.client_id).map(c => `<option value="${c.id}" ${c.id === cur.client_id ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}${isAdmin() ? '<option value="__new">+ Create new client…</option>' : ''}</select></label>
     <div class="field">Color<div class="swatches">${PROJECT_COLORS.map(c => `<button type="button" class="swatch ${c === color ? 'on' : ''}" data-c="${c}" style="background:${c}" aria-label="Color ${c}"></button>`).join('')}</div></div>
-    ${p ? `<label class="check"><input type="checkbox" id="pm-arch" ${cur.archived ? 'checked' : ''}> Archived (no longer selectable)</label>` : ''}`,
-    `<div>${p ? `<button class="btn danger" id="pm-del">${icon('trash')}Delete</button>` : ''}</div><div class="row"><button class="btn" data-close>Cancel</button><button class="btn primary" id="pm-save">Save</button></div>`);
+    ${p && isAdmin() ? `<label class="check"><input type="checkbox" id="pm-arch" ${cur.archived ? 'checked' : ''}> Archived (no longer selectable)</label>` : ''}`,
+    `<div>${p && isAdmin() ? `<button class="btn danger" id="pm-del">${icon('trash')}Delete</button>` : ''}</div><div class="row"><button class="btn" data-close>Cancel</button><button class="btn primary" id="pm-save">Save</button></div>`);
   $$('.swatch', m).forEach(s => s.onclick = () => { color = s.dataset.c; $$('.swatch', m).forEach(x => x.classList.toggle('on', x === s)); });
   $('#pm-client').onchange = async e => {
     if (e.target.value !== '__new') return;
@@ -1766,14 +1768,14 @@ function openProjectModal(p) {
     const name = $('#pm-name').value.trim();
     if (!name) return toast('Enter a project name.', true);
     const row = { name, client_id: $('#pm-client').value || null, color };
-    if (p) row.archived = $('#pm-arch').checked;
+    if (p && isAdmin()) row.archived = $('#pm-arch').checked;
     const { data, error } = p ? await sb.from('projects').update(row).eq('id', p.id).select().single() : await sb.from('projects').insert(row).select().single();
-    if (error) return fail(error);
+    if (error) return fail(!p && /row-level security/i.test(error.message) ? new Error('Run supabase/schema-v7-projecten-aanmaken.sql in Supabase first.') : /0 rows|multiple \(or no\) rows/i.test(error.message) ? new Error('You can only edit projects you created yourself.') : error);
     if (p) Object.assign(p, data); else S.projects.push(data);
     S.projects.sort((a, b) => a.name.localeCompare(b.name));
     closeModal(); toast('Project saved'); renderTimer(); refreshPage();
   };
-  if (p) $('#pm-del').onclick = async () => {
+  if (p && isAdmin()) $('#pm-del').onclick = async () => {
     if (!confirm(`Delete project "${p.name}"? Existing time entries are kept without a project. Archiving is usually better.`)) return;
     const { error } = await sb.from('projects').delete().eq('id', p.id);
     if (error) return fail(error);
