@@ -48,6 +48,7 @@ Nieuwe functies die de database wijzigen komen als apart script in `supabase/`. 
 | [`supabase/schema-v7-projecten-aanmaken.sql`](supabase/schema-v7-projecten-aanmaken.sql) | iedereen mag projecten aanmaken (vanuit de projectlijst) |
 | [`supabase/schema-v8-favoriete-projecten.sql`](supabase/schema-v8-favoriete-projecten.sql) | favoriete projecten (ster) per account |
 | [`supabase/schema-v9-projecten-aanpassen.sql`](supabase/schema-v9-projecten-aanpassen.sql) | eigen projecten achteraf aanpassen (naam, klant, kleur) |
+| [`supabase/schema-v10-iedereen-projecten-aanpassen.sql`](supabase/schema-v10-iedereen-projecten-aanpassen.sql) | iedereen mag naam, klant en kleur van elk project aanpassen (vervangt v9) |
 
 ## Overzetten vanuit Clockify
 
@@ -92,3 +93,4 @@ python3 -m http.server 8000
 | `supabase/schema-v7-projecten-aanmaken.sql` | update: iedereen mag projecten aanmaken |
 | `supabase/schema-v8-favoriete-projecten.sql` | update: favoriete projecten |
 | `supabase/schema-v9-projecten-aanpassen.sql` | update: eigen projecten aanpassen |
+| `supabase/schema-v10-iedereen-projecten-aanpassen.sql` | update: iedereen mag projecten aanpassen |

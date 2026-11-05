@@ -36,8 +36,8 @@ const $$ = (sel, el = document) => [...el.querySelectorAll(sel)];
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const pad = n => String(n).padStart(2, '0');
 const isAdmin = () => S.me?.role === 'admin';
-// Project aanpassen: beheerders alles, anderen enkel wat ze zelf gemaakt hebben (schema-v9: projects.created_by)
-const canEditProject = p => isAdmin() || (!!p?.created_by && p.created_by === S.me?.id);
+// Project aanpassen (naam, klant, kleur): iedereen (schema-v10); archiveren/verwijderen enkel beheerders
+const canEditProject = p => !!p && !!S.me;
 const byId = (list, id) => list.find(x => x.id === id);
 const lc = v => String(v ?? '').trim().toLowerCase();
 const debounce = (fn, ms) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
@@ -1770,7 +1770,7 @@ function openProjectModal(p) {
     const row = { name, client_id: $('#pm-client').value || null, color };
     if (p && isAdmin()) row.archived = $('#pm-arch').checked;
     const { data, error } = p ? await sb.from('projects').update(row).eq('id', p.id).select().single() : await sb.from('projects').insert(row).select().single();
-    if (error) return fail(!p && /row-level security/i.test(error.message) ? new Error('Run supabase/schema-v7-projecten-aanmaken.sql in Supabase first.') : /0 rows|multiple \(or no\) rows/i.test(error.message) ? new Error('You can only edit projects you created yourself.') : error);
+    if (error) return fail(!p && /row-level security/i.test(error.message) ? new Error('Run supabase/schema-v7-projecten-aanmaken.sql in Supabase first.') : /0 rows|multiple \(or no\) rows/i.test(error.message) ? new Error('Run supabase/schema-v10-iedereen-projecten-aanpassen.sql in Supabase first.') : error);
     if (p) Object.assign(p, data); else S.projects.push(data);
     S.projects.sort((a, b) => a.name.localeCompare(b.name));
     closeModal(); toast('Project saved'); renderTimer(); refreshPage();
